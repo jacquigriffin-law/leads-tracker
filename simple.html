@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Leads Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 15px; line-height: 1.6; }
+        .lead { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 8px; }
+        .lead h3 { margin: 0 0 10px 0; color: #333; }
+        .urgent { border-left: 4px solid #ff4444; }
+        .low { border-left: 4px solid #44ff44; }
+    </style>
+</head>
+<body>
+    <h1>📱 Leads Tracker</h1>
+    <p><strong>Status:</strong> <span id="status">Loading...</span></p>
+    
+    <div id="leads-container"></div>
+
+    <script>
+        // Simple leads data
+        const leads = [
+            {name: "Dylan Savage", work: "Care and Protection", urgency: "urgent", date: "27/03/2026"},
+            {name: "Rebecca McFarlane", work: "Care and Protection", urgency: "urgent", date: "27/03/2026"},
+            {name: "Tyler Henderson", work: "Domestic Violence", urgency: "urgent", date: "27/03/2026"},
+            {name: "Nina Rose Pardo", work: "Defamation", urgency: "low", date: "27/03/2026"},
+            {name: "Lukas Little", work: "Family Law", urgency: "urgent", date: "28/03/2026"},
+            {name: "Dianne Ridley", work: "Care and Protection", urgency: "urgent", date: "30/03/2026"}
+        ];
+
+        try {
+            document.getElementById('status').textContent = `${leads.length} leads found ✅`;
+            
+            const container = document.getElementById('leads-container');
+            
+            leads.forEach(lead => {
+                const leadDiv = document.createElement('div');
+                leadDiv.className = `lead ${lead.urgency}`;
+                leadDiv.innerHTML = `
+                    <h3>${lead.name}</h3>
+                    <p><strong>Work:</strong> ${lead.work}</p>
+                    <p><strong>Date:</strong> ${lead.date}</p>
+                    <p><strong>Priority:</strong> ${lead.urgency.toUpperCase()}</p>
+                `;
+                container.appendChild(leadDiv);
+            });
+            
+            console.log('Leads rendered successfully');
+            
+        } catch (error) {
+            document.getElementById('status').textContent = 'Error: ' + error.message;
+            console.error('Error rendering leads:', error);
+        }
+    </script>
+</body>
+</html>
