@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .lead { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Leads Debug Test</h1>
+    <div id="status">Loading...</div>
+    <div id="leads"></div>
+
+    <script>
+        console.log('Script starting...');
+        
+        const leads = [
+            {"Date":"27/03/2026","Name":"Dylan Savage","Type of Work":"Care and Protection"},
+            {"Date":"27/03/2026","Name":"Rebecca McFarlane","Type of Work":"Care and Protection"}
+        ];
+        
+        document.getElementById('status').textContent = `Found ${leads.length} leads`;
+        
+        const container = document.getElementById('leads');
+        leads.forEach(lead => {
+            const div = document.createElement('div');
+            div.className = 'lead';
+            div.innerHTML = `<strong>${lead.Name}</strong><br>${lead["Type of Work"]}`;
+            container.appendChild(div);
+        });
+        
+        console.log('Script completed');
+    </script>
+</body>
+</html>
