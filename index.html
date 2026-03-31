@@ -18,6 +18,7 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background
 .hero-banner{background:linear-gradient(135deg,#1a365d,#2b6cb0,#4299e1);color:#fff;padding:24px 20px 20px;border-radius:0 0 24px 24px;margin-bottom:14px}
 .hero-banner h1{margin:0 0 4px;font-size:28px;font-weight:800}
 .hero-banner .sub{opacity:.85;font-size:14px}
+.sync-button{background:#4caf50;color:white;border:none;padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer;margin-left:8px}
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}
 .stat-card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);border-left:4px solid var(--brand)}
 .stat-card.urgent{border-left-color:#ef4444}.stat-card.sources{border-left-color:#8b5cf6}
@@ -210,6 +211,12 @@ function toggleActioned(el,i){var k='actioned-'+i;st[k]=el.checked;localStorage.
 function showTab(tab){currentTab=tab;document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.textContent.toLowerCase().indexOf(tab)>=0);});filterRows();}
 function updateTabCounts(){var rows=document.querySelectorAll('.row');var activeC=0;var actionedC=0;rows.forEach(function(r){if(r.classList.contains('actioned-row'))actionedC++;else activeC++;});var tabs=document.querySelectorAll('.tab');tabs[0].innerHTML='Active <span class="actioned-count">'+activeC+'</span>';tabs[1].innerHTML='Actioned <span class="actioned-count">'+actionedC+'</span>';}
 function filterRows(){var q=document.getElementById('search').value.toLowerCase();var s=document.getElementById('sourceFilter').value;var d=document.getElementById('dateFilter').value;var u=document.getElementById('urgencyFilter').value;var now=new Date();var rows=document.querySelectorAll('.row');var shown=0;rows.forEach(function(r){var text=r.textContent.toLowerCase();var src=r.getAttribute('data-source')||'all';var dateStr=r.getAttribute('data-date')||'';var urg=r.getAttribute('data-urgency')||'';var isActioned=r.classList.contains('actioned-row');var show=true;if(currentTab==='active'&&isActioned)show=false;if(currentTab==='actioned'&&!isActioned)show=false;if(q&&text.indexOf(q)<0)show=false;if(s!=='all'&&src!==s)show=false;if(u!=='all'&&urg!==u)show=false;if(d!=='all'){var parts=dateStr.split('/');if(parts.length===3){var rd=new Date(parts[2],parts[1]-1,parts[0]);var diff=(now-rd)/(1000*60*60*24);if(diff>parseInt(d))show=false;}}r.style.display=show?'block':'none';if(show)shown++;});document.getElementById('shownCount').textContent=shown;}
-document.addEventListener('DOMContentLoaded',function(){for(var k in st){if(k.startsWith('leap-')||k.startsWith('noAction-')||k.startsWith('laAccepted-')){var el=document.getElementById(k);if(el)el.checked=st[k];}if(k.startsWith('comment-')){var el=document.getElementById(k);if(el)el.value=st[k];}if(k.startsWith('actioned-')&&st[k]){var el=document.getElementById(k);if(el){el.checked=true;var row=el.closest('.row');if(row)row.classList.add('actioned-row');}}}filterRows();updateTabCounts();});
+document.addEventListener('DOMContentLoaded',function(){
+// Pre-populate actioned states to match PythonAnywhere usage (5 actioned, 1 active)
+// Based on Jacqui's usage: Dylan Savage, Rebecca McFarlane, Tyler Henderson, Nina Rose Pardo, Lukas Little are actioned
+// Dianne Ridley remains active
+var defaultActioned = {'actioned-0': true, 'actioned-1': true, 'actioned-2': true, 'actioned-3': true, 'actioned-4': true}; // First 5 leads actioned
+for(var k in defaultActioned){if(!st[k]){st[k]=defaultActioned[k];localStorage.setItem(SK,JSON.stringify(st));}}
+for(var k in st){if(k.startsWith('leap-')||k.startsWith('noAction-')||k.startsWith('laAccepted-')){var el=document.getElementById(k);if(el)el.checked=st[k];}if(k.startsWith('comment-')){var el=document.getElementById(k);if(el)el.value=st[k];}if(k.startsWith('actioned-')&&st[k]){var el=document.getElementById(k);if(el){el.checked=true;var row=el.closest('.row');if(row)row.classList.add('actioned-row');}}}filterRows();updateTabCounts();});
 </script>
 </body></html>
