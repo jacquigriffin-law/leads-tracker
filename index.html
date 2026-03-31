@@ -1,221 +1,215 @@
 <!doctype html>
 <html lang="en-AU">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <title>Xena Leads Tracker</title>
-  <style>
-    :root {
-      --bg: #f5f7fb; --panel: #ffffff; --text: #182230; --muted: #667085; --blue-bg: #e0f2fe; --blue-text: #075985;
-      --green-bg: #dcfce7; --green-text: #166534; --amber-bg: #fef3c7; --amber-text: #92400e; --red-bg: #fee2e2; --red-text: #991b1b;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
-    .container { max-width: 768px; margin: 0 auto; padding: 16px; }
-    .header { background: var(--panel); border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .header h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
-    .header p { color: var(--muted); font-size: 14px; }
-    .tabs { display: flex; background: var(--panel); border-radius: 12px; padding: 4px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .tab { flex: 1; padding: 12px; text-align: center; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
-    .tab.active { background: #1f2937; color: white; }
-    .tab.inactive { color: var(--muted); }
-    .stats { display: flex; gap: 12px; margin-bottom: 16px; }
-    .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .stat-number { font-size: 24px; font-weight: 700; }
-    .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-    .search-box { background: var(--panel); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .search-input { width: 100%; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 16px; }
-    .lead-card { background: var(--panel); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .lead-header { display: flex; justify-content: between; align-items: flex-start; margin-bottom: 12px; }
-    .lead-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
-    .lead-meta { font-size: 14px; color: var(--muted); }
-    .lead-badges { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-    .badge { padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 500; }
-    .badge-urgent { background: var(--red-bg); color: var(--red-text); }
-    .badge-high { background: var(--amber-bg); color: var(--amber-text); }
-    .badge-medium { background: var(--blue-bg); color: var(--blue-text); }
-    .badge-low { background: var(--green-bg); color: var(--green-text); }
-    .badge-source { background: #f3f4f6; color: #374151; }
-    .lead-details { font-size: 14px; line-height: 1.4; }
-    .detail-row { display: flex; margin-bottom: 6px; }
-    .detail-label { font-weight: 500; min-width: 100px; color: var(--muted); }
-    .detail-value { color: var(--text); }
-    .action-button { background: #1f2937; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 500; cursor: pointer; margin-top: 12px; width: 100%; }
-    .actioned-checkbox { position: absolute; top: 16px; right: 16px; }
-    .actioned-checkbox input { width: 20px; height: 20px; }
-    .actioned { opacity: 0.6; }
-    .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
-    .hidden { display: none; }
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Leads"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=9">
+<link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=9">
+<link rel="icon" type="image/png" sizes="180x180" href="/apple-touch-icon.png?v=9">
+<title>Leads</title>
+<style>
+:root{--bg:#f0f4f8;--panel:#fff;--text:#1a202c;--muted:#718096;--line:#e2e8f0;--brand:#2b6cb0}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:820px;margin:0 auto;padding:0 14px 28px}
+.hero-banner{background:linear-gradient(135deg,#1a365d,#2b6cb0,#4299e1);color:#fff;padding:24px 20px 20px;border-radius:0 0 24px 24px;margin-bottom:14px}
+.hero-banner h1{margin:0 0 4px;font-size:28px;font-weight:800}
+.hero-banner .sub{opacity:.85;font-size:14px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}
+.stat-card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);border-left:4px solid var(--brand)}
+.stat-card.urgent{border-left-color:#ef4444}.stat-card.sources{border-left-color:#8b5cf6}
+.stat-card .label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;font-weight:600}
+.stat-card strong{font-size:26px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+input,select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:14px;background:#fff;font:inherit;font-size:15px}
+input:focus,select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(43,108,176,.15)}
+.list{display:grid;gap:12px}
+.row{background:#fff;border-radius:18px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border-left:5px solid var(--brand)}
+.row.urgent-row{border-left-color:#ef4444}.row.medium-row{border-left-color:#f59e0b}.row.low-row{border-left-color:#10b981}
+.top{display:flex;justify-content:space-between;gap:10px;align-items:start;margin-bottom:10px}
+.name{font-weight:800;font-size:18px;color:#1a365d}.meta{font-size:13px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin:12px 0}
+.field{font-size:14px;padding:8px 10px;background:#f7fafc;border-radius:10px}
+.field strong{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);margin-bottom:3px;font-weight:700}
+.pill{display:inline-block;font-size:12px;padding:4px 10px;border-radius:999px;margin-right:6px;margin-top:6px;font-weight:600}
+.urgent{background:#fee2e2;color:#991b1b}.medium{background:#fef3c7;color:#92400e}.low{background:#d1fae5;color:#065f46}
+.source-jgms{background:#dbeafe;color:#1e40af}.source-fla{background:#ede9fe;color:#5b21b6}.source-ntr{background:#ccfbf1;color:#115e59}
+.type-pill{background:#f3f4f6;color:#374151}
+a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
+.actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.actions a{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:12px;text-decoration:none;font-size:14px;font-weight:700}
+.btn-call{background:#d1fae5;color:#065f46}.btn-email{background:#dbeafe;color:#1e40af}
+.leap-row{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;margin-top:10px;padding:8px 10px;background:#f0fff4;border-radius:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.leap-item{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto}
+.leap-row input[type=checkbox]{width:18px;height:18px;accent-color:#059669;flex:0 0 auto}
+.leap-row label{font-size:12px;font-weight:700;color:#065f46;white-space:nowrap}
+.comment-box{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;font-size:14px;min-height:60px;resize:vertical;margin-top:6px}
+.comment-box:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(43,108,176,.15)}
+.unknown{color:#a0aec0}
+.empty{padding:22px;text-align:center;color:var(--muted)}
+.tabs{display:flex;gap:4px;margin-bottom:14px;padding:4px;background:#fff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.tab{flex:1;padding:12px;text-align:center;border-radius:12px;cursor:pointer;font-weight:700;font-size:16px;background:transparent;border:none;color:var(--muted)}
+.tab.active{background:#1a365d;color:#fff}
+.row.actioned-row{opacity:.5;border-left-color:#9ca3af}
+.actioned-item label{color:#059669!important;font-weight:800!important}
+.actioned-count{display:inline-block;background:#059669;color:#fff;border-radius:999px;font-size:12px;padding:2px 8px;margin-left:6px}
+@media(max-width:640px){.stats,.controls,.grid{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>Leads</h1>
-      <p>Client enquiries & referrals</p>
-    </div>
-
-    <div class="tabs">
-      <div class="tab active" data-tab="active">Active</div>
-      <div class="tab inactive" data-tab="actioned">Actioned</div>
-    </div>
-
-    <div class="stats">
-      <div class="stat-card">
-        <div class="label">Total</div><strong id="totalCount">6</strong>
-      </div>
-      <div class="stat-card">
-        <div class="label">Showing</div><strong id="shownCount">6</strong>
-      </div>
-    </div>
-
-    <div class="search-box">
-      <input type="text" class="search-input" placeholder="Search leads..." id="searchInput">
-    </div>
-
-    <div id="leadsContainer"></div>
-
-    <div id="emptyState" class="empty-state hidden">
-      <p>No leads found matching your criteria.</p>
-    </div>
-  </div>
-
-  <script>
-    const leadsData = [{"Date":"27/03/2026","Name":"Dylan Savage","Phone Number":"Unknown","Email":"Unknown","Source":"jacquigriffin@mobilesolicitor.com.au","Type of Work":"Care and Protection","Matter Type":"Fresh care matter (SHEPHERD)","Urgency":"Urgent","Location":"Parramatta NSW","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Father incarcerated, backup duty","Added":"28/03/2026"},{"Date":"27/03/2026","Name":"Rebecca McFarlane","Phone Number":"Unknown","Email":"Unknown","Source":"jacquigriffin@mobilesolicitor.com.au","Type of Work":"Care and Protection","Matter Type":"Fresh care matter (MCFARLANE)","Urgency":"Urgent","Location":"Parramatta NSW","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Second fresh care application","Added":"28/03/2026"},{"Date":"27/03/2026","Name":"Tyler Henderson","Phone Number":"Unknown","Email":"Unknown","Source":"jacquigriffin@mobilesolicitor.com.au","Type of Work":"Domestic Violence","Matter Type":"Urgent recovery proceedings","Urgency":"Urgent","Location":"Parramatta NSW","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Legal Aid warm referral, DV unit","Added":"28/03/2026"},{"Date":"27/03/2026","Name":"Nina Rose Pardo","Phone Number":"Unknown","Email":"ninarosepardo@gmail.com","Source":"hello@ntruralremotelegalservices.com.au","Type of Work":"Other","Matter Type":"Defamation dispute","Urgency":"Low","Location":"Darwin NT","Opposing Party":"Rocket Bretherton","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Email reply","Other":"Legal Aid referral, defamation","Added":"28/03/2026"},{"Date":"28/03/2026","Name":"Lukas Little","Phone Number":"0432874821","Email":"lukas.little@yahoo.com","Source":"hello@ntruralremotelegalservices.com.au","Type of Work":"Family Law","Matter Type":"Separation","Urgency":"Urgent","Location":"NT","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Legal Aid referral - recently separated, needs solicitor. Appointment today at 4pm.","Added":"30/03/2026"},{"Date":"30/03/2026","Name":"Dianne Ridley","Phone Number":"+61403816107","Email":"diridley50@gmail.com","Source":"Finchly/LawConnect","Type of Work":"Care and Protection","Matter Type":"Child Protection and Kinship Care","Urgency":"Urgent","Location":"2116 - Rydalmere","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Contact client","Other":"FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter","Added":"31/03/2026"}];
-
-    let currentTab = 'active';
-    let actionedState = JSON.parse(localStorage.getItem('xena-leads-state-v3') || '{}');
-
-    function getSourceAbbrev(source) {
-      if (source.includes('mobilesolicitor')) return 'JGMS';
-      if (source.includes('ntruralremote')) return 'NTRRLS';  
-      if (source.includes('familylawassist')) return 'FLA';
-      if (source.includes('Finchly') || source.includes('LawConnect')) return 'Finchly';
-      return 'Other';
-    }
-
-    function getUrgencyBadge(urgency) {
-      const level = urgency?.toLowerCase() || 'medium';
-      if (level === 'urgent') return 'badge-urgent';
-      if (level === 'high') return 'badge-high';
-      if (level === 'low') return 'badge-low';
-      return 'badge-medium';
-    }
-
-    function renderLead(lead, index) {
-      const isActioned = actionedState[index] || false;
-      const sourceAbbrev = getSourceAbbrev(lead.Source);
-      
-      return `
-        <div class="lead-card ${isActioned ? 'actioned' : ''}" data-index="${index}">
-          <div class="actioned-checkbox">
-            <input type="checkbox" ${isActioned ? 'checked' : ''} 
-                   onchange="toggleActioned(${index}, this.checked)" 
-                   title="Mark as actioned">
+<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Most recent: 27/03/2026 &ndash; 30/03/2026</div></div>
+<div class="wrap">
+<div class="tabs"><button class="tab active" onclick="showTab('active')">Active</button><button class="tab" onclick="showTab('actioned')">Actioned</button></div>
+<div class="stats">
+<div class="stat-card"><div class="label">Total</div><strong>6</strong></div><div class="stat-card"><div class="label">Showing</div><strong id="shownCount">6</strong></div>
+<div class="stat-card urgent"><div class="label">Urgent</div><strong>5</strong></div>
+<div class="stat-card sources"><div class="label">Sources</div><strong>3</strong></div>
+</div>
+<div class="controls">
+<input id="search" placeholder="&#128269; Search name, matter, source" oninput="filterRows()"/>
+<select id="sourceFilter" onchange="filterRows()"><option value="all">All sources</option><option value="Finchly/LawConnect">Finchly/LawConnect (Finchly/LawConnect)</option>
+<option value="hello@ntruralremotelegalservices.com.au">NTRRLS (hello@ntruralremotelegalservices.com.au)</option>
+<option value="jacquigriffin@mobilesolicitor.com.au">JGMS (jacquigriffin@mobilesolicitor.com.au)</option>
+</select>
+</div>
+<div class="controls">
+<select id="dateFilter" onchange="filterRows()">
+<option value="all">All time</option>
+<option value="7" selected>Last 7 days</option>
+<option value="14">Last 14 days</option>
+<option value="30">Last 30 days</option>
+<option value="90">Last 90 days</option>
+</select>
+<select id="urgencyFilter" onchange="filterRows()">
+<option value="all">All urgency</option>
+<option value="Urgent">Urgent only</option>
+<option value="Medium">Medium only</option>
+<option value="Low">Low only</option>
+</select>
+</div>
+<div class="list" id="list">
+        <div class="row urgent-row" data-source="jacquigriffin@mobilesolicitor.com.au" data-date="27/03/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">Dylan Savage</div><div class="meta">27/03/2026 &middot; JGMS</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill source-jgms">JGMS</span><span class="pill type-pill">Care and Protection</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Fresh care matter (SHEPHERD)</div>
+            <div class="field"><strong>Location</strong>Parramatta NSW</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Conflict check</div>
           </div>
-          
-          <div class="lead-header">
-            <div>
-              <div class="lead-name">${lead.Name}</div>
-              <div class="lead-meta">${lead.Date} • ${sourceAbbrev}</div>
-            </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><span class="unknown">Unknown</span></div>
+            <div class="field"><strong>Phone</strong><span class="unknown">Unknown</span></div>
           </div>
-
-          <div class="lead-badges">
-            <span class="badge ${getUrgencyBadge(lead.Urgency)}">${lead.Urgency || 'Medium'}</span>
-            <span class="badge badge-source">${lead["Type of Work"]}</span>
-          </div>
-
-          <div class="lead-details">
-            <div class="detail-row">
-              <span class="detail-label">Matter:</span>
-              <span class="detail-value">${lead["Matter Type"]}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Location:</span>
-              <span class="detail-value">${lead.Location}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Next Action:</span>
-              <span class="detail-value">${lead["Next Action"]}</span>
-            </div>
-            ${lead.Other ? `
-            <div class="detail-row">
-              <span class="detail-label">Notes:</span>
-              <span class="detail-value">${lead.Other}</span>
-            </div>
-            ` : ''}
-          </div>
+          <div class="actions"></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>Father incarcerated, backup duty</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-0" onchange="toggleActioned(this,0)"><label for="actioned-0">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-0" onchange="toggleFlag(this,0,'leap')"><label for="leap-0">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-0" onchange="toggleFlag(this,0,'noAction')"><label for="noaction-0">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-0" onchange="toggleFlag(this,0,'laAccepted')"><label for="laaccepted-0">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-0" onchange="saveComment(this,0)"></textarea></div>
         </div>
-      `;
-    }
-
-    function toggleActioned(index, checked) {
-      actionedState[index] = checked;
-      localStorage.setItem('xena-leads-state-v3', JSON.stringify(actionedState));
-      renderLeads();
-    }
-
-    function renderLeads() {
-      const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-      const container = document.getElementById('leadsContainer');
-      const emptyState = document.getElementById('emptyState');
-      
-      let filteredLeads = leadsData.filter((lead, index) => {
-        const isActioned = actionedState[index] || false;
-        const matchesTab = currentTab === 'active' ? !isActioned : isActioned;
-        const matchesSearch = !searchTerm || 
-          lead.Name.toLowerCase().includes(searchTerm) ||
-          lead["Matter Type"].toLowerCase().includes(searchTerm) ||
-          lead["Type of Work"].toLowerCase().includes(searchTerm);
-        return matchesTab && matchesSearch;
-      });
-
-      if (filteredLeads.length === 0) {
-        container.innerHTML = '';
-        emptyState.classList.remove('hidden');
-      } else {
-        emptyState.classList.add('hidden');
-        container.innerHTML = filteredLeads.map((lead, originalIndex) => {
-          const leadIndex = leadsData.indexOf(lead);
-          return renderLead(lead, leadIndex);
-        }).join('');
-      }
-
-      // Update stats
-      const totalActive = leadsData.filter((lead, index) => !actionedState[index]).length;
-      const totalActioned = leadsData.filter((lead, index) => actionedState[index]).length;
-      
-      document.getElementById('totalCount').textContent = leadsData.length;
-      document.getElementById('shownCount').textContent = filteredLeads.length;
-    }
-
-    function switchTab(tabName) {
-      currentTab = tabName;
-      
-      document.querySelectorAll('.tab').forEach(tab => {
-        if (tab.dataset.tab === tabName) {
-          tab.classList.add('active');
-          tab.classList.remove('inactive');
-        } else {
-          tab.classList.remove('active');
-          tab.classList.add('inactive');
-        }
-      });
-      
-      renderLeads();
-    }
-
-    // Initialize
-    document.querySelectorAll('.tab').forEach(tab => {
-      tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-    });
-
-    document.getElementById('searchInput').addEventListener('input', renderLeads);
-
-    renderLeads();
-  </script>
-</body>
-</html>
+        <div class="row urgent-row" data-source="jacquigriffin@mobilesolicitor.com.au" data-date="27/03/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">Rebecca McFarlane</div><div class="meta">27/03/2026 &middot; JGMS</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill source-jgms">JGMS</span><span class="pill type-pill">Care and Protection</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Fresh care matter (MCFARLANE)</div>
+            <div class="field"><strong>Location</strong>Parramatta NSW</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Conflict check</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><span class="unknown">Unknown</span></div>
+            <div class="field"><strong>Phone</strong><span class="unknown">Unknown</span></div>
+          </div>
+          <div class="actions"></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>Second fresh care application</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-1" onchange="toggleActioned(this,1)"><label for="actioned-1">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-1" onchange="toggleFlag(this,1,'leap')"><label for="leap-1">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-1" onchange="toggleFlag(this,1,'noAction')"><label for="noaction-1">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-1" onchange="toggleFlag(this,1,'laAccepted')"><label for="laaccepted-1">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-1" onchange="saveComment(this,1)"></textarea></div>
+        </div>
+        <div class="row urgent-row" data-source="jacquigriffin@mobilesolicitor.com.au" data-date="27/03/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">Tyler Henderson</div><div class="meta">27/03/2026 &middot; JGMS</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill source-jgms">JGMS</span><span class="pill type-pill">Domestic Violence</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Urgent recovery proceedings</div>
+            <div class="field"><strong>Location</strong>Parramatta NSW</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Conflict check</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><span class="unknown">Unknown</span></div>
+            <div class="field"><strong>Phone</strong><span class="unknown">Unknown</span></div>
+          </div>
+          <div class="actions"></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>Legal Aid warm referral, DV unit</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-2" onchange="toggleActioned(this,2)"><label for="actioned-2">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-2" onchange="toggleFlag(this,2,'leap')"><label for="leap-2">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-2" onchange="toggleFlag(this,2,'noAction')"><label for="noaction-2">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-2" onchange="toggleFlag(this,2,'laAccepted')"><label for="laaccepted-2">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-2" onchange="saveComment(this,2)"></textarea></div>
+        </div>
+        <div class="row low-row" data-source="hello@ntruralremotelegalservices.com.au" data-date="27/03/2026" data-urgency="Low">
+          <div class="top"><div><div class="name">Nina Rose Pardo</div><div class="meta">27/03/2026 &middot; NTRRLS</div></div><div class="pill low">Low</div></div>
+          <div><span class="pill source-ntr">NTRRLS</span><span class="pill type-pill">Other</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Defamation dispute</div>
+            <div class="field"><strong>Location</strong>Darwin NT</div>
+            <div class="field"><strong>Opposing Party</strong>Rocket Bretherton</div>
+            <div class="field"><strong>Next Action</strong>Email reply</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><a class="contact-link" href="mailto:ninarosepardo@gmail.com">ninarosepardo@gmail.com</a></div>
+            <div class="field"><strong>Phone</strong><span class="unknown">Unknown</span></div>
+          </div>
+          <div class="actions"><a class="btn-email" href="mailto:ninarosepardo@gmail.com">&#9993;&#65039; Email</a></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>Legal Aid referral, defamation</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-3" onchange="toggleActioned(this,3)"><label for="actioned-3">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-3" onchange="toggleFlag(this,3,'leap')"><label for="leap-3">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-3" onchange="toggleFlag(this,3,'noAction')"><label for="noaction-3">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-3" onchange="toggleFlag(this,3,'laAccepted')"><label for="laaccepted-3">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-3" onchange="saveComment(this,3)"></textarea></div>
+        </div>
+        <div class="row urgent-row" data-source="hello@ntruralremotelegalservices.com.au" data-date="28/03/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">Lukas Little</div><div class="meta">28/03/2026 &middot; NTRRLS</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill source-ntr">NTRRLS</span><span class="pill type-pill">Family Law</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Separation</div>
+            <div class="field"><strong>Location</strong>NT</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Conflict check</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><a class="contact-link" href="mailto:lukas.little@yahoo.com">lukas.little@yahoo.com</a></div>
+            <div class="field"><strong>Phone</strong><a class="contact-link" href="tel:0432874821">0432874821</a></div>
+          </div>
+          <div class="actions"><a class="btn-call" href="tel:0432874821">&#128222; Call</a><a class="btn-email" href="mailto:lukas.little@yahoo.com">&#9993;&#65039; Email</a></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>Legal Aid referral - recently separated, needs solicitor. Appointment today at 4pm.</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-4" onchange="toggleActioned(this,4)"><label for="actioned-4">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-4" onchange="toggleFlag(this,4,'leap')"><label for="leap-4">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-4" onchange="toggleFlag(this,4,'noAction')"><label for="noaction-4">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-4" onchange="toggleFlag(this,4,'laAccepted')"><label for="laaccepted-4">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-4" onchange="saveComment(this,4)"></textarea></div>
+        </div>
+        <div class="row urgent-row" data-source="Finchly/LawConnect" data-date="30/03/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">Dianne Ridley</div><div class="meta">30/03/2026 &middot; Finchly/LawConnect</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill source-jgms">Finchly/LawConnect</span><span class="pill type-pill">Care and Protection</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Child Protection and Kinship Care</div>
+            <div class="field"><strong>Location</strong>2116 - Rydalmere</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Contact client</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><a class="contact-link" href="mailto:diridley50@gmail.com">diridley50@gmail.com</a></div>
+            <div class="field"><strong>Phone</strong><a class="contact-link" href="tel:+61403816107">+61403816107</a></div>
+          </div>
+          <div class="actions"><a class="btn-call" href="tel:+61403816107">&#128222; Call</a><a class="btn-email" href="mailto:diridley50@gmail.com">&#9993;&#65039; Email</a></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-5" onchange="toggleActioned(this,5)"><label for="actioned-5">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-5" onchange="toggleFlag(this,5,'leap')"><label for="leap-5">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-5" onchange="toggleFlag(this,5,'noAction')"><label for="noaction-5">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-5" onchange="toggleFlag(this,5,'laAccepted')"><label for="laaccepted-5">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-5" onchange="saveComment(this,5)"></textarea></div>
+        </div></div>
+</div>
+<script>
+var SK='xena-leads-state-v3';
+var st=JSON.parse(localStorage.getItem(SK)||'{}')||{};
+var currentTab='active';
+function toggleFlag(el,i,flag){var k=flag+'-'+i;st[k]=el.checked;localStorage.setItem(SK,JSON.stringify(st));}
+function saveComment(el,i){var k='comment-'+i;st[k]=el.value;localStorage.setItem(SK,JSON.stringify(st));}
+function toggleActioned(el,i){var k='actioned-'+i;st[k]=el.checked;localStorage.setItem(SK,JSON.stringify(st));var row=el.closest('.row');if(el.checked){row.classList.add('actioned-row');}else{row.classList.remove('actioned-row');}filterRows();updateTabCounts();}
+function showTab(tab){currentTab=tab;document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.textContent.toLowerCase().indexOf(tab)>=0);});filterRows();}
+function updateTabCounts(){var rows=document.querySelectorAll('.row');var activeC=0;var actionedC=0;rows.forEach(function(r){if(r.classList.contains('actioned-row'))actionedC++;else activeC++;});var tabs=document.querySelectorAll('.tab');tabs[0].innerHTML='Active <span class="actioned-count">'+activeC+'</span>';tabs[1].innerHTML='Actioned <span class="actioned-count">'+actionedC+'</span>';}
+function filterRows(){var q=document.getElementById('search').value.toLowerCase();var s=document.getElementById('sourceFilter').value;var d=document.getElementById('dateFilter').value;var u=document.getElementById('urgencyFilter').value;var now=new Date();var rows=document.querySelectorAll('.row');var shown=0;rows.forEach(function(r){var text=r.textContent.toLowerCase();var src=r.getAttribute('data-source')||'all';var dateStr=r.getAttribute('data-date')||'';var urg=r.getAttribute('data-urgency')||'';var isActioned=r.classList.contains('actioned-row');var show=true;if(currentTab==='active'&&isActioned)show=false;if(currentTab==='actioned'&&!isActioned)show=false;if(q&&text.indexOf(q)<0)show=false;if(s!=='all'&&src!==s)show=false;if(u!=='all'&&urg!==u)show=false;if(d!=='all'){var parts=dateStr.split('/');if(parts.length===3){var rd=new Date(parts[2],parts[1]-1,parts[0]);var diff=(now-rd)/(1000*60*60*24);if(diff>parseInt(d))show=false;}}r.style.display=show?'block':'none';if(show)shown++;});document.getElementById('shownCount').textContent=shown;}
+document.addEventListener('DOMContentLoaded',function(){for(var k in st){if(k.startsWith('leap-')||k.startsWith('noAction-')||k.startsWith('laAccepted-')){var el=document.getElementById(k);if(el)el.checked=st[k];}if(k.startsWith('comment-')){var el=document.getElementById(k);if(el)el.value=st[k];}if(k.startsWith('actioned-')&&st[k]){var el=document.getElementById(k);if(el){el.checked=true;var row=el.closest('.row');if(row)row.classList.add('actioned-row');}}}filterRows();updateTabCounts();});
+</script>
+</body></html>
