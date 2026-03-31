@@ -215,7 +215,18 @@ function exportData(){var data={timestamp:new Date().toISOString(),version:'xena
 function importData(){document.getElementById('import-file').click();}
 function handleFileImport(input){var file=input.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(e){try{var importedData=JSON.parse(e.target.result);if(importedData.version==='xena-leads-v1'&&importedData.data){for(var key in importedData.data){st[key]=importedData.data[key];}localStorage.setItem(SK,JSON.stringify(st));location.reload();alert('✅ Data imported successfully! Page refreshed.');}else{alert('❌ Invalid file format. Please export from leads tracker.');}}catch(error){alert('❌ Error reading file: '+error.message);}};reader.readAsText(file);}
 document.addEventListener('DOMContentLoaded',function(){
-// Clean start - no pre-populated data, fresh beginning on Vercel
+// Pre-populate with actual PythonAnywhere data (extracted 31 Mar 2026)
+var pythonData = {
+  'actioned-0': true, 'comment-0': 'Father incarcerated, backup duty', 'leap-0': true,
+  'actioned-1': true, 'comment-1': 'Second fresh care application', 'leap-1': true, 
+  'actioned-2': true, 'comment-2': 'Legal Aid warm referral, DV unit', 'leap-2': true,
+  'actioned-3': false, 'comment-3': 'Legal Aid referral, defamation', 
+  'actioned-4': true, 'comment-4': 'Call on phone got nt voucher, recently separated, needs solicitor. Appointment today at 4pm.', 'leap-4': true,
+  'actioned-5': true, 'comment-5': 'FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter', 'leap-5': true
+};
+// Only set if not already exists in localStorage
+for(var k in pythonData){if(!st[k]){st[k]=pythonData[k];localStorage.setItem(SK,JSON.stringify(st));}}
+// Apply saved states to UI
 for(var k in st){if(k.startsWith('leap-')||k.startsWith('noAction-')||k.startsWith('laAccepted-')){var el=document.getElementById(k);if(el)el.checked=st[k];}if(k.startsWith('comment-')){var el=document.getElementById(k);if(el)el.value=st[k];}if(k.startsWith('actioned-')&&st[k]){var el=document.getElementById(k);if(el){el.checked=true;var row=el.closest('.row');if(row)row.classList.add('actioned-row');}}}filterRows();updateTabCounts();});
 </script>
 </body></html>
