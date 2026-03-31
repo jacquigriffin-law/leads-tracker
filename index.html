@@ -61,7 +61,12 @@ a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
 </style>
 </head>
 <body>
-<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Most recent: 27/03/2026 &ndash; 30/03/2026</div></div>
+<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Most recent: 27/03/2026 &ndash; 30/03/2026</div>
+<div style="margin-top:12px;">
+<button onclick="exportData()" style="background:#4caf50;color:white;border:none;padding:6px 12px;border-radius:6px;margin-right:8px;font-size:12px;cursor:pointer;">📥 Export Data</button>
+<button onclick="importData()" style="background:#2196f3;color:white;border:none;padding:6px 12px;border-radius:6px;margin-right:8px;font-size:12px;cursor:pointer;">📤 Import Data</button>
+<input type="file" id="import-file" accept=".json" style="display:none;" onchange="handleFileImport(this)">
+</div></div>
 <div class="wrap">
 <div class="tabs"><button class="tab active" onclick="showTab('active')">Active</button><button class="tab" onclick="showTab('actioned')">Actioned</button></div>
 <div class="stats">
@@ -211,6 +216,9 @@ function toggleActioned(el,i){var k='actioned-'+i;st[k]=el.checked;localStorage.
 function showTab(tab){currentTab=tab;document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.textContent.toLowerCase().indexOf(tab)>=0);});filterRows();}
 function updateTabCounts(){var rows=document.querySelectorAll('.row');var activeC=0;var actionedC=0;rows.forEach(function(r){if(r.classList.contains('actioned-row'))actionedC++;else activeC++;});var tabs=document.querySelectorAll('.tab');tabs[0].innerHTML='Active <span class="actioned-count">'+activeC+'</span>';tabs[1].innerHTML='Actioned <span class="actioned-count">'+actionedC+'</span>';}
 function filterRows(){var q=document.getElementById('search').value.toLowerCase();var s=document.getElementById('sourceFilter').value;var d=document.getElementById('dateFilter').value;var u=document.getElementById('urgencyFilter').value;var now=new Date();var rows=document.querySelectorAll('.row');var shown=0;rows.forEach(function(r){var text=r.textContent.toLowerCase();var src=r.getAttribute('data-source')||'all';var dateStr=r.getAttribute('data-date')||'';var urg=r.getAttribute('data-urgency')||'';var isActioned=r.classList.contains('actioned-row');var show=true;if(currentTab==='active'&&isActioned)show=false;if(currentTab==='actioned'&&!isActioned)show=false;if(q&&text.indexOf(q)<0)show=false;if(s!=='all'&&src!==s)show=false;if(u!=='all'&&urg!==u)show=false;if(d!=='all'){var parts=dateStr.split('/');if(parts.length===3){var rd=new Date(parts[2],parts[1]-1,parts[0]);var diff=(now-rd)/(1000*60*60*24);if(diff>parseInt(d))show=false;}}r.style.display=show?'block':'none';if(show)shown++;});document.getElementById('shownCount').textContent=shown;}
+function exportData(){var data={timestamp:new Date().toISOString(),version:'xena-leads-v1',data:st};var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='leads-data-'+new Date().toISOString().split('T')[0]+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);alert('✅ Data exported! Save this file to import into Vercel.');}
+function importData(){document.getElementById('import-file').click();}
+function handleFileImport(input){var file=input.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(e){try{var importedData=JSON.parse(e.target.result);if(importedData.version==='xena-leads-v1'&&importedData.data){for(var key in importedData.data){st[key]=importedData.data[key];}localStorage.setItem(SK,JSON.stringify(st));location.reload();alert('✅ Data imported successfully! Page refreshed.');}else{alert('❌ Invalid file format. Please export from leads tracker.');}}catch(error){alert('❌ Error reading file: '+error.message);}};reader.readAsText(file);}
 document.addEventListener('DOMContentLoaded',function(){
 // Pre-populate actioned states to match PythonAnywhere usage (5 actioned, 1 active)
 // Based on Jacqui's usage: Dylan Savage, Rebecca McFarlane, Tyler Henderson, Nina Rose Pardo, Lukas Little are actioned
