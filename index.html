@@ -68,8 +68,8 @@ a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
 <div class="wrap">
 <div class="tabs"><button class="tab active" onclick="showTab('active')">Active</button><button class="tab" onclick="showTab('actioned')">Actioned</button></div>
 <div class="stats">
-<div class="stat-card"><div class="label">Total</div><strong>6</strong></div><div class="stat-card"><div class="label">Showing</div><strong id="shownCount">6</strong></div>
-<div class="stat-card urgent"><div class="label">Urgent</div><strong>5</strong></div>
+<div class="stat-card"><div class="label">Total</div><strong>7</strong></div><div class="stat-card"><div class="label">Showing</div><strong id="shownCount">7</strong></div>
+<div class="stat-card urgent"><div class="label">Urgent</div><strong>6</strong></div>
 <div class="stat-card sources"><div class="label">Sources</div><strong>3</strong></div>
 </div>
 <div class="controls">
@@ -202,6 +202,24 @@ a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
           <div class="field" style="margin-top:8px"><strong>Summary</strong>FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter</div>
           <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-5" onchange="toggleActioned(this,5)"><label for="actioned-5">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-5" onchange="toggleFlag(this,5,'leap')"><label for="leap-5">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-5" onchange="toggleFlag(this,5,'noAction')"><label for="noaction-5">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-5" onchange="toggleFlag(this,5,'laAccepted')"><label for="laaccepted-5">LA</label></div></div>
           <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-5" onchange="saveComment(this,5)"></textarea></div>
+        </div>
+        <div class="row urgent-row" data-source="Finchly/LawConnect" data-date="31/03/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">Laurie Bamford</div><div class="meta">31/03/2026 &middot; Finchly/LawConnect</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill source-jgms">Finchly/LawConnect</span><span class="pill type-pill">Family Law</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Section 90 application</div>
+            <div class="field"><strong>Location</strong>Unknown</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Call ASAP</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><a class="contact-link" href="mailto:ljbamford83@gmail.com">ljbamford83@gmail.com</a></div>
+            <div class="field"><strong>Phone</strong><a class="contact-link" href="tel:0402798314">0402798314</a></div>
+          </div>
+          <div class="actions"><a class="btn-call" href="tel:0402798314">&#128222; Call</a><a class="btn-email" href="mailto:ljbamford83@gmail.com">&#9993;&#65039; Email</a></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>Legal Aid referral - Section 90 property settlement application. Asking to be called ASAP.</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-6" onchange="toggleActioned(this,6)"><label for="actioned-6">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-6" onchange="toggleFlag(this,6,'leap')"><label for="leap-6">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-6" onchange="toggleFlag(this,6,'noAction')"><label for="noaction-6">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-6" onchange="toggleFlag(this,6,'laAccepted')"><label for="laaccepted-6">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-6" onchange="saveComment(this,6)"></textarea></div>
         </div></div>
 </div>
 <script>
@@ -218,14 +236,15 @@ function exportData(){var data={timestamp:new Date().toISOString(),version:'xena
 function importData(){document.getElementById('import-file').click();}
 function handleFileImport(input){var file=input.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(e){try{var importedData=JSON.parse(e.target.result);if(importedData.version==='xena-leads-v1'&&importedData.data){for(var key in importedData.data){st[key]=importedData.data[key];}localStorage.setItem(SK,JSON.stringify(st));location.reload();alert('✅ Data imported successfully! Page refreshed.');}else{alert('❌ Invalid file format. Please export from leads tracker.');}}catch(error){alert('❌ Error reading file: '+error.message);}};reader.readAsText(file);}
 document.addEventListener('DOMContentLoaded',function(){
-// Pre-populate with actual PythonAnywhere data (extracted 31 Mar 2026)
+// Current PythonAnywhere data (synced 31 Mar 2026 5:52 PM) - 7 leads total
 var pythonData = {
   'actioned-0': true, 'comment-0': 'Father incarcerated, backup duty', 'leap-0': true,
   'actioned-1': true, 'comment-1': 'Second fresh care application', 'leap-1': true, 
   'actioned-2': true, 'comment-2': 'Legal Aid warm referral, DV unit', 'leap-2': true,
   'actioned-3': false, 'comment-3': 'Legal Aid referral, defamation', 
   'actioned-4': true, 'comment-4': 'Call on phone got nt voucher, recently separated, needs solicitor. Appointment today at 4pm.', 'leap-4': true,
-  'actioned-5': true, 'comment-5': 'FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter', 'leap-5': true
+  'actioned-5': true, 'comment-5': 'FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter', 'leap-5': true,
+  'actioned-6': false, 'comment-6': 'URGENT: Legal Aid referral - Section 90 property settlement. Call ASAP 0402798314'
 };
 // Only set if not already exists in localStorage
 for(var k in pythonData){if(!st[k]){st[k]=pythonData[k];localStorage.setItem(SK,JSON.stringify(st));}}
