@@ -5,598 +5,217 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Leads" />
-  <title>Leads Register</title>
+  <title>Xena Leads Tracker</title>
   <style>
     :root {
-      --bg: #f5f7fb; --panel: #ffffff; --text: #182230; --muted: #667085; 
-      --blue-bg: #e0f2fe; --blue-text: #075985;
-      --green-bg: #dcfce7; --green-text: #166534; 
-      --amber-bg: #fef3c7; --amber-text: #92400e; 
-      --red-bg: #fee2e2; --red-text: #991b1b;
-      --actioned-bg: #f9fafb; --actioned-text: #9ca3af;
+      --bg: #f5f7fb; --panel: #ffffff; --text: #182230; --muted: #667085; --blue-bg: #e0f2fe; --blue-text: #075985;
+      --green-bg: #dcfce7; --green-text: #166534; --amber-bg: #fef3c7; --amber-text: #92400e; --red-bg: #fee2e2; --red-text: #991b1b;
     }
-    * { box-sizing: border-box; }
-    body { 
-      margin: 0; 
-      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; 
-      background: var(--bg); 
-      color: var(--text); 
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-    .container { 
-      max-width: 430px; 
-      margin: 0 auto; 
-      min-height: 100vh;
-      padding: env(safe-area-inset-top) 16px 16px 16px;
-    }
-    
-    /* Header */
-    .header { 
-      margin-bottom: 20px; 
-    }
-    h1 { 
-      margin: 0 0 4px; 
-      font-size: 32px; 
-      font-weight: 700; 
-      letter-spacing: -0.5px;
-    }
-    .subtitle { 
-      color: var(--muted); 
-      font-size: 16px; 
-    }
-    
-    /* Tab Navigation */
-    .tabs {
-      display: flex;
-      gap: 4px;
-      margin: 20px 0;
-      padding: 4px;
-      background: var(--panel);
-      border-radius: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-    .tab {
-      flex: 1;
-      padding: 12px;
-      text-align: center;
-      border-radius: 12px;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 16px;
-      transition: all 0.2s;
-      background: transparent;
-      border: none;
-      color: var(--muted);
-    }
-    .tab.active {
-      background: var(--text);
-      color: white;
-      transform: scale(1.02);
-    }
-    
-    /* Stats */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    .stat-card {
-      background: var(--panel);
-      padding: 16px;
-      border-radius: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      text-align: center;
-    }
-    .stat-number {
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 4px;
-      display: block;
-    }
-    .stat-label {
-      font-size: 13px;
-      color: var(--muted);
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    
-    /* Search */
-    .search-box {
-      position: relative;
-      margin-bottom: 20px;
-    }
-    .search-input {
-      width: 100%;
-      padding: 16px 20px;
-      border: none;
-      border-radius: 16px;
-      background: var(--panel);
-      font-size: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-    .search-input:focus {
-      outline: 2px solid var(--blue-text);
-      outline-offset: -2px;
-    }
-    
-    /* Lead Cards */
-    .leads-list {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .lead-card {
-      background: var(--panel);
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      position: relative;
-      transition: all 0.2s;
-    }
-    .lead-card.actioned {
-      background: var(--actioned-bg);
-      opacity: 0.7;
-    }
-    .lead-card:active {
-      transform: scale(0.98);
-    }
-    
-    .lead-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 12px;
-    }
-    .lead-name {
-      font-size: 20px;
-      font-weight: 700;
-      margin: 0 0 4px;
-      line-height: 1.2;
-    }
-    .lead-date {
-      font-size: 14px;
-      color: var(--muted);
-    }
-    .priority-badge {
-      padding: 6px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .priority-urgent { background: var(--red-bg); color: var(--red-text); }
-    .priority-medium { background: var(--amber-bg); color: var(--amber-text); }
-    .priority-low { background: var(--green-bg); color: var(--green-text); }
-    
-    .lead-details {
-      margin-bottom: 16px;
-    }
-    .lead-email {
-      font-size: 15px;
-      color: var(--blue-text);
-      margin-bottom: 8px;
-      word-break: break-all;
-    }
-    .lead-type {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 8px;
-    }
-    .lead-summary {
-      font-size: 14px;
-      color: var(--muted);
-      line-height: 1.4;
-    }
-    
-    /* Action Bar */
-    .action-bar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      align-items: center;
-      padding-top: 16px;
-      border-top: 1px solid #f0f0f0;
-    }
-    .action-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-    }
-    .checkbox {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
-      accent-color: var(--green-text);
-    }
-    .actioned-checkbox .checkbox {
-      accent-color: #059669;
-    }
-    .checkbox-label {
-      font-size: 14px;
-      font-weight: 600;
-      user-select: none;
-    }
-    .actioned-label {
-      color: #059669;
-    }
-    
-    .email-button {
-      margin-left: auto;
-      padding: 10px 16px;
-      background: var(--blue-bg);
-      color: var(--blue-text);
-      border: none;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    
-    /* Tab Content */
-    .tab-content {
-      display: none;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    
-    .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-    }
-    .empty-state-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-      opacity: 0.3;
-    }
-    .empty-state h3 {
-      font-size: 18px;
-      margin: 0 0 8px;
-      color: var(--text);
-    }
-    .empty-state p {
-      color: var(--muted);
-      margin: 0;
-    }
-    
-    /* Loading State */
-    .loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 40px;
-    }
-    .spinner {
-      width: 32px;
-      height: 32px;
-      border: 3px solid var(--muted);
-      border-top: 3px solid var(--text);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    .container { max-width: 768px; margin: 0 auto; padding: 16px; }
+    .header { background: var(--panel); border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+    .header p { color: var(--muted); font-size: 14px; }
+    .tabs { display: flex; background: var(--panel); border-radius: 12px; padding: 4px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .tab { flex: 1; padding: 12px; text-align: center; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+    .tab.active { background: #1f2937; color: white; }
+    .tab.inactive { color: var(--muted); }
+    .stats { display: flex; gap: 12px; margin-bottom: 16px; }
+    .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .stat-number { font-size: 24px; font-weight: 700; }
+    .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .search-box { background: var(--panel); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .search-input { width: 100%; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 16px; }
+    .lead-card { background: var(--panel); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .lead-header { display: flex; justify-content: between; align-items: flex-start; margin-bottom: 12px; }
+    .lead-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .lead-meta { font-size: 14px; color: var(--muted); }
+    .lead-badges { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .badge { padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+    .badge-urgent { background: var(--red-bg); color: var(--red-text); }
+    .badge-high { background: var(--amber-bg); color: var(--amber-text); }
+    .badge-medium { background: var(--blue-bg); color: var(--blue-text); }
+    .badge-low { background: var(--green-bg); color: var(--green-text); }
+    .badge-source { background: #f3f4f6; color: #374151; }
+    .lead-details { font-size: 14px; line-height: 1.4; }
+    .detail-row { display: flex; margin-bottom: 6px; }
+    .detail-label { font-weight: 500; min-width: 100px; color: var(--muted); }
+    .detail-value { color: var(--text); }
+    .action-button { background: #1f2937; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 500; cursor: pointer; margin-top: 12px; width: 100%; }
+    .actioned-checkbox { position: absolute; top: 16px; right: 16px; }
+    .actioned-checkbox input { width: 20px; height: 20px; }
+    .actioned { opacity: 0.6; }
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <h1>Leads</h1>
-      <div class="subtitle">Client enquiries & referrals</div>
+      <p>Client enquiries & referrals</p>
     </div>
 
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('active')">
-        Active
-      </button>
-      <button class="tab" onclick="switchTab('actioned')">
-        Actioned
-      </button>
+      <div class="tab active" data-tab="active">Active</div>
+      <div class="tab inactive" data-tab="actioned">Actioned</div>
     </div>
 
-    <div id="active-content" class="tab-content active">
-      <div class="stats">
-        <div class="stat-card">
-          <span class="stat-number" id="activeCount">-</span>
-          <div class="stat-label">Active</div>
-        </div>
-        <div class="stat-card">
-          <span class="stat-number" id="urgentCount">-</span>
-          <div class="stat-label">Urgent</div>
-        </div>
+    <div class="stats">
+      <div class="stat-card">
+        <div class="label">Total</div><strong id="totalCount">6</strong>
       </div>
-
-      <div class="search-box">
-        <input type="text" class="search-input" id="searchInput" 
-               placeholder="Search leads..." />
-      </div>
-
-      <div class="leads-list" id="activeLeads">
-        <div class="loading">
-          <div class="spinner"></div>
-        </div>
+      <div class="stat-card">
+        <div class="label">Showing</div><strong id="shownCount">6</strong>
       </div>
     </div>
 
-    <div id="actioned-content" class="tab-content">
-      <div class="stats">
-        <div class="stat-card">
-          <span class="stat-number" id="actionedCount">-</span>
-          <div class="stat-label">Completed</div>
-        </div>
-        <div class="stat-card">
-          <span class="stat-number" id="successRate">-%</span>
-          <div class="stat-label">Success Rate</div>
-        </div>
-      </div>
+    <div class="search-box">
+      <input type="text" class="search-input" placeholder="Search leads..." id="searchInput">
+    </div>
 
-      <div class="leads-list" id="actionedLeads"></div>
+    <div id="leadsContainer"></div>
+
+    <div id="emptyState" class="empty-state hidden">
+      <p>No leads found matching your criteria.</p>
     </div>
   </div>
 
   <script>
-    const STORAGE_KEY = 'leads-register-mobile';
-    let leads = [];
-    let leadStates = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    const leadsData = [{"Date":"27/03/2026","Name":"Dylan Savage","Phone Number":"Unknown","Email":"Unknown","Source":"jacquigriffin@mobilesolicitor.com.au","Type of Work":"Care and Protection","Matter Type":"Fresh care matter (SHEPHERD)","Urgency":"Urgent","Location":"Parramatta NSW","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Father incarcerated, backup duty","Added":"28/03/2026"},{"Date":"27/03/2026","Name":"Rebecca McFarlane","Phone Number":"Unknown","Email":"Unknown","Source":"jacquigriffin@mobilesolicitor.com.au","Type of Work":"Care and Protection","Matter Type":"Fresh care matter (MCFARLANE)","Urgency":"Urgent","Location":"Parramatta NSW","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Second fresh care application","Added":"28/03/2026"},{"Date":"27/03/2026","Name":"Tyler Henderson","Phone Number":"Unknown","Email":"Unknown","Source":"jacquigriffin@mobilesolicitor.com.au","Type of Work":"Domestic Violence","Matter Type":"Urgent recovery proceedings","Urgency":"Urgent","Location":"Parramatta NSW","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Legal Aid warm referral, DV unit","Added":"28/03/2026"},{"Date":"27/03/2026","Name":"Nina Rose Pardo","Phone Number":"Unknown","Email":"ninarosepardo@gmail.com","Source":"hello@ntruralremotelegalservices.com.au","Type of Work":"Other","Matter Type":"Defamation dispute","Urgency":"Low","Location":"Darwin NT","Opposing Party":"Rocket Bretherton","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Email reply","Other":"Legal Aid referral, defamation","Added":"28/03/2026"},{"Date":"28/03/2026","Name":"Lukas Little","Phone Number":"0432874821","Email":"lukas.little@yahoo.com","Source":"hello@ntruralremotelegalservices.com.au","Type of Work":"Family Law","Matter Type":"Separation","Urgency":"Urgent","Location":"NT","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Conflict check","Other":"Legal Aid referral - recently separated, needs solicitor. Appointment today at 4pm.","Added":"30/03/2026"},{"Date":"30/03/2026","Name":"Dianne Ridley","Phone Number":"+61403816107","Email":"diridley50@gmail.com","Source":"Finchly/LawConnect","Type of Work":"Care and Protection","Matter Type":"Child Protection and Kinship Care","Urgency":"Urgent","Location":"2116 - Rydalmere","Opposing Party":"Unknown","Existing Client":"No","Estimated Value":"Unknown","Next Action":"Contact client","Other":"FINCHLY ACCEPTED LEAD - Family Law Child Protection and Kinship Care Matter","Added":"31/03/2026"}];
+
     let currentTab = 'active';
+    let actionedState = JSON.parse(localStorage.getItem('xena-leads-state-v3') || '{}');
 
-    function saveStates() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(leadStates));
+    function getSourceAbbrev(source) {
+      if (source.includes('mobilesolicitor')) return 'JGMS';
+      if (source.includes('ntruralremote')) return 'NTRRLS';  
+      if (source.includes('familylawassist')) return 'FLA';
+      if (source.includes('Finchly') || source.includes('LawConnect')) return 'Finchly';
+      return 'Other';
     }
 
-    function getLeadKey(lead) {
-      return `${lead.Name || lead.sender_name}|${lead.Email || lead.sender_email}`;
+    function getUrgencyBadge(urgency) {
+      const level = urgency?.toLowerCase() || 'medium';
+      if (level === 'urgent') return 'badge-urgent';
+      if (level === 'high') return 'badge-high';
+      if (level === 'low') return 'badge-low';
+      return 'badge-medium';
     }
 
-    function isActioned(lead) {
-      const key = getLeadKey(lead);
-      return leadStates[key]?.actioned || false;
-    }
-
-    function setActioned(lead, actioned) {
-      const key = getLeadKey(lead);
-      if (!leadStates[key]) leadStates[key] = {};
-      leadStates[key].actioned = actioned;
-      leadStates[key].actionedAt = actioned ? new Date().toISOString() : null;
-      saveStates();
-      renderCurrentTab();
-    }
-
-    function switchTab(tab) {
-      currentTab = tab;
+    function renderLead(lead, index) {
+      const isActioned = actionedState[index] || false;
+      const sourceAbbrev = getSourceAbbrev(lead.Source);
       
-      // Update tab buttons
-      document.querySelectorAll('.tab').forEach(btn => {
-        btn.classList.toggle('active', btn.textContent.toLowerCase().includes(tab));
+      return `
+        <div class="lead-card ${isActioned ? 'actioned' : ''}" data-index="${index}">
+          <div class="actioned-checkbox">
+            <input type="checkbox" ${isActioned ? 'checked' : ''} 
+                   onchange="toggleActioned(${index}, this.checked)" 
+                   title="Mark as actioned">
+          </div>
+          
+          <div class="lead-header">
+            <div>
+              <div class="lead-name">${lead.Name}</div>
+              <div class="lead-meta">${lead.Date} • ${sourceAbbrev}</div>
+            </div>
+          </div>
+
+          <div class="lead-badges">
+            <span class="badge ${getUrgencyBadge(lead.Urgency)}">${lead.Urgency || 'Medium'}</span>
+            <span class="badge badge-source">${lead["Type of Work"]}</span>
+          </div>
+
+          <div class="lead-details">
+            <div class="detail-row">
+              <span class="detail-label">Matter:</span>
+              <span class="detail-value">${lead["Matter Type"]}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Location:</span>
+              <span class="detail-value">${lead.Location}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Next Action:</span>
+              <span class="detail-value">${lead["Next Action"]}</span>
+            </div>
+            ${lead.Other ? `
+            <div class="detail-row">
+              <span class="detail-label">Notes:</span>
+              <span class="detail-value">${lead.Other}</span>
+            </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleActioned(index, checked) {
+      actionedState[index] = checked;
+      localStorage.setItem('xena-leads-state-v3', JSON.stringify(actionedState));
+      renderLeads();
+    }
+
+    function renderLeads() {
+      const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+      const container = document.getElementById('leadsContainer');
+      const emptyState = document.getElementById('emptyState');
+      
+      let filteredLeads = leadsData.filter((lead, index) => {
+        const isActioned = actionedState[index] || false;
+        const matchesTab = currentTab === 'active' ? !isActioned : isActioned;
+        const matchesSearch = !searchTerm || 
+          lead.Name.toLowerCase().includes(searchTerm) ||
+          lead["Matter Type"].toLowerCase().includes(searchTerm) ||
+          lead["Type of Work"].toLowerCase().includes(searchTerm);
+        return matchesTab && matchesSearch;
       });
-      
-      // Update tab content
-      document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-      });
-      document.getElementById(`${tab}-content`).classList.add('active');
-      
-      renderCurrentTab();
-    }
 
-    function renderCurrentTab() {
-      if (currentTab === 'active') {
-        renderActiveLeads();
-      } else {
-        renderActionedLeads();
-      }
-      updateStats();
-    }
-
-    function renderActiveLeads() {
-      const searchQuery = document.getElementById('searchInput').value.toLowerCase();
-      const activeLeads = leads.filter(lead => !isActioned(lead));
-      
-      let filteredLeads = activeLeads;
-      if (searchQuery) {
-        filteredLeads = activeLeads.filter(lead => 
-          (lead.Name || lead.sender_name || '').toLowerCase().includes(searchQuery) ||
-          (lead.Email || lead.sender_email || '').toLowerCase().includes(searchQuery) ||
-          (lead.Other || lead.raw_preview || '').toLowerCase().includes(searchQuery)
-        );
-      }
-
-      const container = document.getElementById('activeLeads');
-      
       if (filteredLeads.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-icon">✅</div>
-            <h3>${searchQuery ? 'No matching leads' : 'All caught up!'}</h3>
-            <p>${searchQuery ? 'Try adjusting your search' : 'No active leads requiring attention'}</p>
-          </div>
-        `;
-        return;
+        container.innerHTML = '';
+        emptyState.classList.remove('hidden');
+      } else {
+        emptyState.classList.add('hidden');
+        container.innerHTML = filteredLeads.map((lead, originalIndex) => {
+          const leadIndex = leadsData.indexOf(lead);
+          return renderLead(lead, leadIndex);
+        }).join('');
       }
 
-      container.innerHTML = filteredLeads.map(lead => {
-        const name = lead.Name || lead.sender_name || 'Unknown';
-        const email = lead.Email || lead.sender_email || 'No email';
-        const type = lead['Type of Work'] || lead.matter_type || 'Unknown';
-        const urgency = (lead.Urgency || lead.priority || 'Medium').toLowerCase();
-        const date = lead.Date || (lead.date_received ? lead.date_received.split('T')[0] : '');
-        const summary = lead.Other || lead.raw_preview || 'No details available';
-
-        return `
-          <div class="lead-card">
-            <div class="lead-header">
-              <div>
-                <h3 class="lead-name">${escapeHtml(name)}</h3>
-                <div class="lead-date">${formatDate(date)}</div>
-              </div>
-              <div class="priority-badge priority-${urgency}">
-                ${urgency}
-              </div>
-            </div>
-            
-            <div class="lead-details">
-              <div class="lead-email">${escapeHtml(email)}</div>
-              <div class="lead-type">${escapeHtml(type)}</div>
-              <div class="lead-summary">${escapeHtml(summary)}</div>
-            </div>
-            
-            <div class="action-bar">
-              <label class="action-checkbox actioned-checkbox">
-                <input type="checkbox" class="checkbox" 
-                       onchange="setActioned(${JSON.stringify(lead).replace(/"/g, '&quot;')}, this.checked)" />
-                <span class="checkbox-label actioned-label">Actioned</span>
-              </label>
-              
-              <label class="action-checkbox">
-                <input type="checkbox" class="checkbox" />
-                <span class="checkbox-label">LEAP</span>
-              </label>
-              
-              ${email !== 'No email' && email !== 'Unknown' ? 
-                `<a href="mailto:${email}" class="email-button">
-                  📧 Email
-                </a>` : ''
-              }
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    function renderActionedLeads() {
-      const actionedLeads = leads.filter(lead => isActioned(lead));
-      const container = document.getElementById('actionedLeads');
+      // Update stats
+      const totalActive = leadsData.filter((lead, index) => !actionedState[index]).length;
+      const totalActioned = leadsData.filter((lead, index) => actionedState[index]).length;
       
-      if (actionedLeads.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-icon">📋</div>
-            <h3>No actioned leads</h3>
-            <p>Completed leads will appear here</p>
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = actionedLeads.map(lead => {
-        const name = lead.Name || lead.sender_name || 'Unknown';
-        const email = lead.Email || lead.sender_email || 'No email';
-        const type = lead['Type of Work'] || lead.matter_type || 'Unknown';
-        const date = lead.Date || (lead.date_received ? lead.date_received.split('T')[0] : '');
-        const summary = lead.Other || lead.raw_preview || 'No details available';
-        
-        const key = getLeadKey(lead);
-        const actionedAt = leadStates[key]?.actionedAt;
-
-        return `
-          <div class="lead-card actioned">
-            <div class="lead-header">
-              <div>
-                <h3 class="lead-name">${escapeHtml(name)}</h3>
-                <div class="lead-date">
-                  ${formatDate(date)}
-                  ${actionedAt ? ` • Actioned ${formatDate(actionedAt)}` : ''}
-                </div>
-              </div>
-            </div>
-            
-            <div class="lead-details">
-              <div class="lead-email">${escapeHtml(email)}</div>
-              <div class="lead-type">${escapeHtml(type)}</div>
-              <div class="lead-summary">${escapeHtml(summary)}</div>
-            </div>
-            
-            <div class="action-bar">
-              <label class="action-checkbox actioned-checkbox">
-                <input type="checkbox" class="checkbox" checked
-                       onchange="setActioned(${JSON.stringify(lead).replace(/"/g, '&quot;')}, this.checked)" />
-                <span class="checkbox-label actioned-label">Actioned</span>
-              </label>
-            </div>
-          </div>
-        `;
-      }).join('');
+      document.getElementById('totalCount').textContent = leadsData.length;
+      document.getElementById('shownCount').textContent = filteredLeads.length;
     }
 
-    function updateStats() {
-      const activeLeads = leads.filter(lead => !isActioned(lead));
-      const actionedLeads = leads.filter(lead => isActioned(lead));
-      const urgentActive = activeLeads.filter(lead => 
-        (lead.Urgency || lead.priority || '').toLowerCase() === 'urgent'
-      );
+    function switchTab(tabName) {
+      currentTab = tabName;
       
-      document.getElementById('activeCount').textContent = activeLeads.length;
-      document.getElementById('urgentCount').textContent = urgentActive.length;
-      document.getElementById('actionedCount').textContent = actionedLeads.length;
-      
-      const successRate = leads.length > 0 ? 
-        Math.round((actionedLeads.length / leads.length) * 100) : 0;
-      document.getElementById('successRate').textContent = `${successRate}%`;
-    }
-
-    function formatDate(dateStr) {
-      if (!dateStr) return '';
-      try {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-AU', { 
-          day: 'numeric', 
-          month: 'short',
-          year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
-        });
-      } catch {
-        return dateStr;
-      }
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text || '';
-      return div.innerHTML;
-    }
-
-    async function loadLeads() {
-      try {
-        // Try microapp-data.json first (current format)
-        let response = await fetch('microapp-data.json');
-        if (!response.ok) {
-          // Fallback to leads-register.json
-          response = await fetch('leads-register.json');
+      document.querySelectorAll('.tab').forEach(tab => {
+        if (tab.dataset.tab === tabName) {
+          tab.classList.add('active');
+          tab.classList.remove('inactive');
+        } else {
+          tab.classList.remove('active');
+          tab.classList.add('inactive');
         }
-        
-        const data = await response.json();
-        leads = data.leads || [];
-        renderCurrentTab();
-      } catch (error) {
-        console.error('Failed to load leads:', error);
-        document.getElementById('activeLeads').innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-icon">⚠️</div>
-            <h3>Failed to load leads</h3>
-            <p>Please check your connection and try again</p>
-          </div>
-        `;
-      }
+      });
+      
+      renderLeads();
     }
-
-    // Event listeners
-    document.getElementById('searchInput').addEventListener('input', renderCurrentTab);
 
     // Initialize
-    loadLeads();
-    
-    // Auto-refresh every 5 minutes
-    setInterval(loadLeads, 5 * 60 * 1000);
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+
+    document.getElementById('searchInput').addEventListener('input', renderLeads);
+
+    renderLeads();
   </script>
 </body>
 </html>
