@@ -61,12 +61,7 @@ a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
 </style>
 </head>
 <body>
-<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Most recent: 27/03/2026 &ndash; 30/03/2026</div>
-<div style="margin-top:12px;">
-<button onclick="exportData()" style="background:#4caf50;color:white;border:none;padding:6px 12px;border-radius:6px;margin-right:8px;font-size:12px;cursor:pointer;">📥 Export Data</button>
-<button onclick="importData()" style="background:#2196f3;color:white;border:none;padding:6px 12px;border-radius:6px;margin-right:8px;font-size:12px;cursor:pointer;">📤 Import Data</button>
-<input type="file" id="import-file" accept=".json" style="display:none;" onchange="handleFileImport(this)">
-</div></div>
+<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Fresh start on Vercel | Active from 31/03/2026</div></div>
 <div class="wrap">
 <div class="tabs"><button class="tab active" onclick="showTab('active')">Active</button><button class="tab" onclick="showTab('actioned')">Actioned</button></div>
 <div class="stats">
@@ -220,11 +215,7 @@ function exportData(){var data={timestamp:new Date().toISOString(),version:'xena
 function importData(){document.getElementById('import-file').click();}
 function handleFileImport(input){var file=input.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(e){try{var importedData=JSON.parse(e.target.result);if(importedData.version==='xena-leads-v1'&&importedData.data){for(var key in importedData.data){st[key]=importedData.data[key];}localStorage.setItem(SK,JSON.stringify(st));location.reload();alert('✅ Data imported successfully! Page refreshed.');}else{alert('❌ Invalid file format. Please export from leads tracker.');}}catch(error){alert('❌ Error reading file: '+error.message);}};reader.readAsText(file);}
 document.addEventListener('DOMContentLoaded',function(){
-// Pre-populate actioned states to match PythonAnywhere usage (5 actioned, 1 active)
-// Based on Jacqui's usage: Dylan Savage, Rebecca McFarlane, Tyler Henderson, Nina Rose Pardo, Lukas Little are actioned
-// Dianne Ridley remains active
-var defaultActioned = {'actioned-0': true, 'actioned-1': true, 'actioned-2': true, 'actioned-3': true, 'actioned-4': true}; // First 5 leads actioned
-for(var k in defaultActioned){if(!st[k]){st[k]=defaultActioned[k];localStorage.setItem(SK,JSON.stringify(st));}}
+// Clean start - no pre-populated data, fresh beginning on Vercel
 for(var k in st){if(k.startsWith('leap-')||k.startsWith('noAction-')||k.startsWith('laAccepted-')){var el=document.getElementById(k);if(el)el.checked=st[k];}if(k.startsWith('comment-')){var el=document.getElementById(k);if(el)el.value=st[k];}if(k.startsWith('actioned-')&&st[k]){var el=document.getElementById(k);if(el){el.checked=true;var row=el.closest('.row');if(row)row.classList.add('actioned-row');}}}filterRows();updateTabCounts();});
 </script>
 </body></html>
