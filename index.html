@@ -64,13 +64,13 @@ a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
 </style>
 </head>
 <body>
-<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Fresh start on Vercel | Active from 31/03/2026</div></div>
+<div class="hero-banner"><h1>&#9878;&#65039; Leads Register</h1><div class="sub">All leads | Fresh start on Vercel | Active from 31/03/2026 | Updated 02/04/2026</div></div>
 <div class="wrap">
 <div class="tabs"><button class="tab active" onclick="showTab('active')">Active</button><button class="tab" onclick="showTab('actioned')">Actioned</button></div>
 <div class="stats">
-<div class="stat-card"><div class="label">Total</div><strong>7</strong></div><div class="stat-card"><div class="label">Showing</div><strong id="shownCount">7</strong></div>
-<div class="stat-card urgent"><div class="label">Urgent</div><strong>6</strong></div>
-<div class="stat-card sources"><div class="label">Sources</div><strong>3</strong></div>
+<div class="stat-card"><div class="label">Total</div><strong>9</strong></div><div class="stat-card"><div class="label">Showing</div><strong id="shownCount">9</strong></div>
+<div class="stat-card urgent"><div class="label">Urgent</div><strong>8</strong></div>
+<div class="stat-card sources"><div class="label">Sources</div><strong>4</strong></div>
 </div>
 <div class="controls">
 <input id="search" placeholder="&#128269; Search name, matter, source" oninput="filterRows()"/>
@@ -220,6 +220,42 @@ a.contact-link{color:#2b6cb0;text-decoration:none;font-weight:600}
           <div class="field" style="margin-top:8px"><strong>Summary</strong>Legal Aid referral - Section 90 property settlement application. Asking to be called ASAP.</div>
           <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-6" onchange="toggleActioned(this,6)"><label for="actioned-6">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-6" onchange="toggleFlag(this,6,'leap')"><label for="leap-6">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-6" onchange="toggleFlag(this,6,'noAction')"><label for="noaction-6">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-6" onchange="toggleFlag(this,6,'laAccepted')"><label for="laaccepted-6">LA</label></div></div>
           <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-6" onchange="saveComment(this,6)"></textarea></div>
+        </div>
+        <div class="row urgent-row" data-source="SMS" data-date="02/04/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">SMS Lead #1</div><div class="meta">02/04/2026 &middot; SMS Forward</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill" style="background:#fef3c7;color:#92400e">SMS Forward</span><span class="pill type-pill">Family Law</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>Family Court matter</div>
+            <div class="field"><strong>Location</strong>Unknown</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Call back ASAP</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><span class="unknown">Unknown</span></div>
+            <div class="field"><strong>Phone</strong><span class="unknown">Check SMS app</span></div>
+          </div>
+          <div class="actions"></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>SMS received: &quot;I need a lawyer for family court&quot; — forwarded via Forward SMS app 02/04/2026 12:12 PM</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-7" onchange="toggleActioned(this,7)"><label for="actioned-7">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-7" onchange="toggleFlag(this,7,'leap')"><label for="leap-7">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-7" onchange="toggleFlag(this,7,'noAction')"><label for="noaction-7">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-7" onchange="toggleFlag(this,7,'laAccepted')"><label for="laaccepted-7">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-7" onchange="saveComment(this,7)"></textarea></div>
+        </div>
+        <div class="row urgent-row" data-source="SMS" data-date="02/04/2026" data-urgency="Urgent">
+          <div class="top"><div><div class="name">SMS Lead #2</div><div class="meta">02/04/2026 &middot; SMS Forward</div></div><div class="pill urgent">Urgent</div></div>
+          <div><span class="pill" style="background:#fef3c7;color:#92400e">SMS Forward</span><span class="pill type-pill">General Enquiry</span></div>
+          <div class="grid">
+            <div class="field"><strong>Matter Type</strong>General legal enquiry</div>
+            <div class="field"><strong>Location</strong>Unknown</div>
+            <div class="field"><strong>Opposing Party</strong>Unknown</div>
+            <div class="field"><strong>Next Action</strong>Call back ASAP</div>
+          </div>
+          <div class="grid">
+            <div class="field"><strong>Email</strong><span class="unknown">Unknown</span></div>
+            <div class="field"><strong>Phone</strong><span class="unknown">Check SMS app</span></div>
+          </div>
+          <div class="actions"></div>
+          <div class="field" style="margin-top:8px"><strong>Summary</strong>SMS received: &quot;Need a lawyer&quot; — forwarded via Forward SMS app 02/04/2026 12:13 PM</div>
+          <div class="leap-row"><div class="leap-item actioned-item"><input type="checkbox" id="actioned-8" onchange="toggleActioned(this,8)"><label for="actioned-8">✅ Actioned</label></div><div class="leap-item"><input type="checkbox" id="leap-8" onchange="toggleFlag(this,8,'leap')"><label for="leap-8">LEAP Client</label></div><div class="leap-item"><input type="checkbox" id="noaction-8" onchange="toggleFlag(this,8,'noAction')"><label for="noaction-8">No Action</label></div><div class="leap-item"><input type="checkbox" id="laaccepted-8" onchange="toggleFlag(this,8,'laAccepted')"><label for="laaccepted-8">LA</label></div></div>
+          <div class="field" style="background:transparent;padding:4px 0"><strong>Comment</strong><textarea class="comment-box" placeholder="Add a comment..." id="comment-8" onchange="saveComment(this,8)"></textarea></div>
         </div></div>
 </div>
 <script>
