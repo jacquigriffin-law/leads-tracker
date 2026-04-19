@@ -5,6 +5,7 @@ const MAGIC_LINK_COOLDOWN_MS = 60 * 1000;
 const CONFIG_PATH = './config.js';
 const INBOX_IMPORTED_KEY = 'xena-leads-inbox-imported';
 const INBOX_DISMISSED_KEY = 'xena-leads-inbox-dismissed';
+const INBOX_SHOW_DISMISSED_KEY = 'xena-leads-inbox-show-dismissed';
 const DEFAULT_CONFIG = { supabase: { enabled: false, url: '', anonKey: '' } };
 
 const els = {
@@ -42,7 +43,8 @@ const app = {
   inboxAccount: '',
   inboxLive: false,
   inboxImported: new Set(),
-  inboxDismissed: new Set()
+  inboxDismissed: new Set(),
+  inboxShowDismissed: false
 };
 
 function showNotice(message, kind = 'info') {
@@ -282,6 +284,8 @@ async function loadInbox() {
 
   const dismissed = JSON.parse(localStorage.getItem(INBOX_DISMISSED_KEY) || '[]');
   app.inboxDismissed = new Set(Array.isArray(dismissed) ? dismissed : []);
+
+  app.inboxShowDismissed = localStorage.getItem(INBOX_SHOW_DISMISSED_KEY) === '1';
 }
 
 function persistInboxImported() {
@@ -292,18 +296,27 @@ function persistInboxDismissed() {
   localStorage.setItem(INBOX_DISMISSED_KEY, JSON.stringify([...app.inboxDismissed]));
 }
 
+function persistInboxShowDismissed() {
+  localStorage.setItem(INBOX_SHOW_DISMISSED_KEY, app.inboxShowDismissed ? '1' : '0');
+}
+
 function inboxAvatarInitials(name) {
   return String(name || '?').split(' ').map((w) => w[0] || '').slice(0, 2).join('').toUpperCase() || '?';
 }
 
-function renderInboxEmail(email) {
+function renderInboxEmail(email, isDismissed = false) {
   const initials = escapeHtml(inboxAvatarInitials(email.from_name));
   const date = formatDateTime(email.received_at);
   const urgentClass = String(email.priority || '').toUpperCase() === 'URGENT' ? ' inbox-urgent' : '';
   const priorityClass = pillClass(email.priority);
   const priorityVal = String(email.priority || 'Medium');
   const priorityLabel = priorityVal.charAt(0).toUpperCase() + priorityVal.slice(1).toLowerCase();
-  return `<div class="inbox-card${urgentClass}">
+  const dismissedClass = isDismissed ? ' inbox-dismissed' : '';
+  const dismissedBadge = isDismissed ? '<span class="inbox-dismissed-badge">Dismissed</span>' : '';
+  const actionButtons = isDismissed
+    ? `<button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button><button class="btn-undismiss" type="button" data-undismiss-id="${escapeHtml(String(email.id))}">Restore</button>`
+    : `<button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button><button class="btn-dismiss" type="button" data-dismiss-id="${escapeHtml(String(email.id))}">Dismiss</button>`;
+  return `<div class="inbox-card${urgentClass}${dismissedClass}">
     <div class="inbox-from">
       <div class="inbox-avatar">${initials}</div>
       <div class="inbox-from-details">
@@ -311,6 +324,7 @@ function renderInboxEmail(email) {
         <div class="inbox-from-addr">${escapeHtml(email.from_email)} &#x2192; ${escapeHtml(email.source_account || app.inboxAccount || 'Inbox')}</div>
       </div>
       <div class="pill ${escapeHtml(priorityClass)} priority-pill">${escapeHtml(priorityLabel)}</div>
+      ${dismissedBadge}
     </div>
     <div class="inbox-subject">${escapeHtml(email.subject)}</div>
     <div class="inbox-snippet">${escapeHtml(email.snippet)}</div>
@@ -321,8 +335,7 @@ function renderInboxEmail(email) {
       <span class="inbox-meta-pill">${escapeHtml(email.source_label || 'Email')}</span>
     </div>
     <div class="actions">
-      <button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button>
-      <button class="btn-dismiss" type="button" data-dismiss-id="${escapeHtml(String(email.id))}">Dismiss</button>
+      ${actionButtons}
     </div>
   </div>`;
 }
@@ -334,15 +347,21 @@ function renderInbox() {
     return;
   }
   const pending = app.inbox.filter((e) => !app.inboxImported.has(e.id) && !app.inboxDismissed.has(e.id));
-  if (!pending.length) {
-    els.list.innerHTML = '<div class="inbox-empty">No new messages in the inbox. Dismissed emails are hidden in this browser only — the original email is untouched in your mailbox.</div>';
+  const dismissed = app.inbox.filter((e) => !app.inboxImported.has(e.id) && app.inboxDismissed.has(e.id));
+  const dismissedToggle = dismissed.length
+    ? `<button class="inbox-toggle-dismissed" type="button" data-toggle-dismissed="1">${app.inboxShowDismissed ? 'Hide dismissed' : `Show dismissed (${dismissed.length})`}</button>`
+    : '';
+  if (!pending.length && (!app.inboxShowDismissed || !dismissed.length)) {
+    els.list.innerHTML = `<div class="inbox-empty">No new messages in the inbox. Dismissed emails are hidden in this browser only — the original email is untouched in your mailbox.</div>` +
+      (dismissedToggle ? `<div class="inbox-dismissed-controls">${dismissedToggle}</div>` : '');
     els.emptyState.hidden = true;
     return;
   }
   const accounts = (app.inboxAccounts && app.inboxAccounts.length) ? app.inboxAccounts : [app.inboxAccount || 'Inbox'];
   const accountLabel = accounts.join(', ');
-  els.list.innerHTML = `<div class="inbox-header">Live inbox &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}. <em>Import as Lead</em> adds to the tracker. <em>Dismiss</em> hides here only &mdash; the email stays in your mailbox.</div>` +
-    pending.map(renderInboxEmail).join('');
+  els.list.innerHTML = `<div class="inbox-header">Live inbox &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}. <em>Import as Lead</em> adds to the tracker. <em>Dismiss</em> hides here only &mdash; the email stays in your mailbox.${dismissedToggle ? ` ${dismissedToggle}` : ''}</div>` +
+    pending.map((e) => renderInboxEmail(e, false)).join('') +
+    (app.inboxShowDismissed ? dismissed.map((e) => renderInboxEmail(e, true)).join('') : '');
   els.emptyState.hidden = true;
 }
 
@@ -384,6 +403,21 @@ function dismissInboxEmail(emailId) {
   persistInboxDismissed();
   renderInbox();
   updateTabCounts();
+}
+
+function undismissInboxEmail(emailId) {
+  const email = app.inbox.find((e) => String(e.id) === String(emailId));
+  if (!email) return;
+  app.inboxDismissed.delete(email.id);
+  persistInboxDismissed();
+  renderInbox();
+  updateTabCounts();
+}
+
+function toggleInboxShowDismissed() {
+  app.inboxShowDismissed = !app.inboxShowDismissed;
+  persistInboxShowDismissed();
+  renderInbox();
 }
 
 async function loadSupabaseState() {
@@ -699,6 +733,8 @@ function attachEvents() {
     if (event.target.matches('button[data-delete-id]')) handleDeleteLead(event.target);
     if (event.target.matches('button[data-import-id]')) importInboxEmail(event.target.dataset.importId);
     if (event.target.matches('button[data-dismiss-id]')) dismissInboxEmail(event.target.dataset.dismissId);
+    if (event.target.matches('button[data-undismiss-id]')) undismissInboxEmail(event.target.dataset.undismissId);
+    if (event.target.matches('button[data-toggle-dismissed]')) toggleInboxShowDismissed();
   });
 
   els.updateNowLink.addEventListener('click', () => {
