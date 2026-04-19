@@ -259,7 +259,8 @@ async function loadInbox() {
       const json = await response.json();
       if (json.configured && Array.isArray(json.emails)) {
         app.inbox = json.emails;
-        app.inboxAccount = json.inbox_account || json.account || 'Gmail';
+        app.inboxAccount = json.inbox_account || json.account || 'Inbox';
+        app.inboxAccounts = json.inbox_accounts || [app.inboxAccount];
         app.inboxLive = true;
       } else {
         app.inbox = [];
@@ -298,7 +299,7 @@ function renderInboxEmail(email) {
       <div class="inbox-avatar">${initials}</div>
       <div class="inbox-from-details">
         <div class="inbox-from-name">${escapeHtml(email.from_name)}</div>
-        <div class="inbox-from-addr">${escapeHtml(email.from_email)} &#x2192; ${escapeHtml(app.inboxAccount || 'Gmail')}</div>
+        <div class="inbox-from-addr">${escapeHtml(email.from_email)} &#x2192; ${escapeHtml(email.source_account || app.inboxAccount || 'Inbox')}</div>
       </div>
       <div class="pill ${escapeHtml(priorityClass)} priority-pill">${escapeHtml(priorityLabel)}</div>
     </div>
@@ -318,7 +319,7 @@ function renderInboxEmail(email) {
 
 function renderInbox() {
   if (!app.inboxLive && !app.inbox.length) {
-    els.list.innerHTML = '<div class="inbox-empty">Inbox not configured. Set GMAIL_USER and GMAIL_APP_PASSWORD in Vercel environment variables to enable live Gmail inbox.</div>';
+    els.list.innerHTML = '<div class="inbox-empty">Inbox not configured. Set JGMS_EMAIL + Azure credentials, FLA_EMAIL + FLA_IMAP_PASSWORD, or NTRRLS_EMAIL + NTRRLS_IMAP_PASSWORD in Vercel environment variables to enable live inbox.</div>';
     els.emptyState.hidden = true;
     return;
   }
@@ -328,8 +329,9 @@ function renderInbox() {
     els.emptyState.hidden = true;
     return;
   }
-  const account = app.inboxAccount || 'Gmail';
-  els.list.innerHTML = `<div class="inbox-header">Live Gmail inbox: <strong>${escapeHtml(account)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}. Click <em>Import as Lead</em> to move any email into the tracker.</div>` +
+  const accounts = (app.inboxAccounts && app.inboxAccounts.length) ? app.inboxAccounts : [app.inboxAccount || 'Inbox'];
+  const accountLabel = accounts.join(', ');
+  els.list.innerHTML = `<div class="inbox-header">Live inbox &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}. Click <em>Import as Lead</em> to move any email into the tracker.</div>` +
     pending.map(renderInboxEmail).join('');
   els.emptyState.hidden = true;
 }
@@ -346,9 +348,9 @@ function importInboxEmail(emailId) {
     sender_phone: email.phone || 'Unknown',
     subject: email.subject,
     date_received: email.received_at,
-    source_account: 'Direct Email',
+    source_account: email.source_account || 'Direct Email',
     source_platform: 'Email',
-    source_rule: `Live Gmail inbox (${app.inboxAccount || 'Gmail'}) - ${email.source_label || 'Email'}`,
+    source_rule: `Live inbox (${email.source_account || app.inboxAccount || 'Inbox'}) - ${email.source_label || 'Email'}`,
     matter_type: email.matter_type || 'Unknown',
     priority: email.priority || 'MEDIUM',
     status: 'new',
