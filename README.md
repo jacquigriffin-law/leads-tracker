@@ -112,10 +112,35 @@ Each email in the combined inbox carries a `mailbox` key (`jgms` / `fla` / `ntrr
 
 ## Security model
 
-- `leads` is read-only to authenticated users.
+- `leads` is intended to be read-only to an explicit email allow-list of authorised users.
 - `lead_states` is per-user via `auth.uid() = user_id`.
+- `lead_audit_log` records changes to `lead_states`.
+- `lead_access_log` records significant access events via `log_lead_access_event(...)`, including lead batch loads and inbox import/dismiss actions.
 - Browser only uses Supabase anon key.
 - Service role key stays server-side only.
+
+## Production-safe posture
+
+- Treat `data.json` and `leads.json` as local migration files only, not a live hosted data source.
+- In production, `vercel.json` blocks public access to `data.json`, `leads.json`, SQL files, local docs, and helper scripts.
+- `/api/inbox` is default-deny. It requires:
+  - a valid Supabase JWT in the `Authorization` header
+  - `SUPABASE_JWT_SECRET` in Vercel env
+  - `INBOX_ALLOWED_EMAILS` in Vercel env
+- Inbox responses are minimised for triage. They return snippets only, not full message bodies.
+- Inbox-imported leads store the snippet once in `raw_preview`; they do not duplicate it into `notes`.
+
+## Data handling, retention, and AI
+
+- This app does **not** send lead data to an LLM or AI provider.
+- Supabase is the intended primary store for lead records.
+- Browser `localStorage` should contain only per-user state such as flags, dismissals, and comments.
+- Suggested retention:
+  - declined / no action leads: 12 months
+  - actioned leads that become matter records: retain per matter-file rules, typically 7 years after closure
+  - audit logs: retain 7 years minimum
+
+See `SECURITY.md` for the fuller hardening note, blocker list, and residual risks.
 
 ## Notes
 

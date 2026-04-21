@@ -42,9 +42,11 @@ const app = {
   inbox: [],
   inboxAccount: '',
   inboxLive: false,
+  inboxAuthRequired: false,
   inboxImported: new Set(),
   inboxDismissed: new Set(),
-  inboxShowDismissed: false
+  inboxShowDismissed: false,
+  hasLoggedLeadRead: false
 };
 
 function showNotice(message, kind = 'info') {
@@ -108,6 +110,57 @@ function escapeHtml(value = '') {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function getEmailDomain(value) {
+  const email = String(value || '').trim().toLowerCase();
+  const at = email.indexOf('@');
+  return at > -1 ? email.slice(at + 1) : '';
+}
+
+function getSourceMeta(source) {
+  const value = String(source || '').trim();
+  const normalized = value.toLowerCase();
+  if (normalized === 'jacquigriffin@mobilesolicitor.com.au' || normalized === 'jgms') {
+    return { key: 'jgms', label: 'JGMS', className: 'source-jgms' };
+  }
+  if (normalized === 'hello@ntruralremotelegalservices.com.au' || normalized === 'ntrrls') {
+    return { key: 'ntrrls', label: 'NTRRLS', className: 'source-ntr' };
+  }
+  if (normalized === 'hello@familylawassist.net.au' || normalized === 'fla') {
+    return { key: 'fla', label: 'FLA', className: 'source-fla' };
+  }
+  if (normalized === 'finchly/lawconnect') {
+    return { key: 'finchly-lawconnect', label: 'Finchly/LawConnect', className: 'source-fla' };
+  }
+  if (normalized === 'sms') {
+    return { key: 'sms', label: 'SMS Forward', className: '' };
+  }
+  if (!value) {
+    return { key: 'unknown', label: 'Unknown', className: '' };
+  }
+  const safeKey = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+  const safeLabel = value.length > 32 ? `${value.slice(0, 29)}…` : value;
+  return { key: `other-${safeKey}`, label: safeLabel, className: '' };
+}
+
+function getLeadSourceValue(lead) {
+  return lead.source_account || lead.source_platform || 'Unknown';
+}
+
+async function logSecurityEvent(eventType, targetId = null, metadata = {}) {
+  clientAudit(eventType, { targetId, ...metadata });
+  if (!(app.supabase && app.session)) return;
+  try {
+    const { error } = await app.supabase.rpc('log_lead_access_event', {
+      p_event_type: eventType,
+      p_target_id: targetId ? String(targetId) : null,
+      p_metadata: metadata
+    });
+    if (error) throw error;
+  } catch (error) {
+    console.warn('Security event log failed', error);
+  }
 }
 
 function getLeadId(lead, index) {
@@ -195,6 +248,7 @@ async function initSupabase() {
   refreshAuthUi();
   app.supabase.auth.onAuthStateChange((_event, session) => {
     app.session = session;
+    app.hasLoggedLeadRead = false;
     app.authPanelOpen = false;
     refreshAuthUi();
     if (session) hydrate().catch(handleError);
@@ -226,6 +280,38 @@ function refreshAuthUi() {
 }
 
 async function loadLeads() {
+  // When Supabase is configured, all lead data comes from the database.
+  // data.json is only used in standalone mode (Supabase disabled in config.js).
+  if (isSupabaseEnabled()) {
+    if (!app.session) {
+      // Not signed in — show no leads rather than falling back to a public file.
+      app.leads = [];
+      app.lastUpdated = '';
+      app.remoteLeadIds = new Set();
+      app.hasLoggedLeadRead = false;
+      return;
+    }
+    const { data, error } = await app.supabase
+      .from('leads')
+      .select('id,source_account,date_received,sender_name,sender_email,sender_phone,subject,source_rule,source_platform,matter_type,priority,status,notes,draft_reply,raw_preview,reviewed_at,location,opposing_party,next_action')
+      .order('date_received', { ascending: false });
+    if (error) throw new Error(`Supabase leads error: ${error.message}`);
+    app.leads = data || [];
+    app.lastUpdated = app.leads[0]?.date_received || '';
+    app.remoteLeadIds = new Set(app.leads.map((l) => Number(l.id)));
+    if (!app.hasLoggedLeadRead) {
+      app.hasLoggedLeadRead = true;
+      void logSecurityEvent('leads.read_batch', null, { count: app.leads.length });
+    }
+    return;
+  }
+
+  // Standalone mode — Supabase not configured, load from local data.json.
+  // IMPORTANT: In production, vercel.json blocks data.json with a 404 response,
+  // so loadFromFile() will fail and execution falls through to the localStorage
+  // import below. This is intentional — data.json contains PII and must not be
+  // publicly accessible. To load leads in standalone mode, import a leads file
+  // via the UI (localStorage-backed), or configure Supabase and enable it in config.js.
   const imported = JSON.parse(localStorage.getItem('xena-leads-data-import') || 'null');
 
   async function loadFromFile() {
@@ -238,29 +324,29 @@ async function loadLeads() {
 
   try {
     await loadFromFile();
-  } catch (error) {
+  } catch {
     if (Array.isArray(imported?.leads) && imported.leads.length) {
       app.leads = imported.leads;
       app.lastUpdated = imported.last_updated || '';
     } else {
-      throw error;
+      app.leads = [];
+      app.lastUpdated = '';
     }
   }
-
   app.remoteLeadIds = new Set();
-  if (app.supabase && app.session) {
-    const { data, error } = await app.supabase.from('leads').select('id');
-    if (!error && Array.isArray(data)) {
-      app.remoteLeadIds = new Set(data.map((row) => Number(row.id)));
-    }
-  }
 }
 
 async function loadInbox() {
   try {
-    const response = await fetch(`/api/inbox?t=${Date.now()}`, { cache: 'no-store' });
+    // Pass the Supabase session JWT so the inbox endpoint can verify the caller.
+    const headers = {};
+    if (app.session?.access_token) {
+      headers['Authorization'] = `Bearer ${app.session.access_token}`;
+    }
+    const response = await fetch(`/api/inbox?t=${Date.now()}`, { cache: 'no-store', headers });
     if (response.ok) {
       const json = await response.json();
+      app.inboxAuthRequired = false;
       if (json.configured && Array.isArray(json.emails)) {
         app.inbox = json.emails;
         app.inboxAccount = json.inbox_account || json.account || 'Inbox';
@@ -273,6 +359,7 @@ async function loadInbox() {
     } else {
       app.inbox = [];
       app.inboxLive = false;
+      app.inboxAuthRequired = response.status === 401 || response.status === 403;
     }
   } catch {
     app.inbox = [];
@@ -342,7 +429,10 @@ function renderInboxEmail(email, isDismissed = false) {
 
 function renderInbox() {
   if (!app.inboxLive && !app.inbox.length) {
-    els.list.innerHTML = '<div class="inbox-empty">Inbox not configured. Set JGMS_EMAIL + Azure credentials, FLA_EMAIL + FLA_IMAP_PASSWORD, or NTRRLS_EMAIL + NTRRLS_IMAP_PASSWORD in Vercel environment variables to enable live inbox.</div>';
+    const msg = app.inboxAuthRequired
+      ? 'Sign in to access the live inbox.'
+      : 'Inbox not configured. Set JGMS_EMAIL + Azure credentials, FLA_EMAIL + FLA_IMAP_PASSWORD, or NTRRLS_EMAIL + NTRRLS_IMAP_PASSWORD in Vercel environment variables to enable live inbox.';
+    els.list.innerHTML = `<div class="inbox-empty">${msg}</div>`;
     els.emptyState.hidden = true;
     return;
   }
@@ -365,9 +455,23 @@ function renderInbox() {
   els.emptyState.hidden = true;
 }
 
+// Structured client-side audit logging. Matches the JSON format used in api/inbox.js
+// so that both server and browser console logs share the same queryable shape.
+// Browser console logs are not durable — for formal compliance, also review Vercel
+// runtime logs (server-side events) and the Supabase lead_audit_log table.
+function clientAudit(event, details) {
+  console.log(JSON.stringify({ audit: true, event, ts: new Date().toISOString(), user: app.session?.user?.email || 'unauthenticated', ...details }));
+}
+
 function importInboxEmail(emailId) {
   const email = app.inbox.find((e) => String(e.id) === String(emailId));
   if (!email) return;
+  const sourceMeta = getSourceMeta(email.source_account || app.inboxAccount || 'Inbox');
+  void logSecurityEvent('inbox.import', String(email.id), {
+    source: sourceMeta.key,
+    from_domain: getEmailDomain(email.from_email),
+    has_phone: Boolean(email.phone)
+  });
   app.inboxImported.add(email.id);
   persistInboxImported();
   const lead = {
@@ -383,7 +487,7 @@ function importInboxEmail(emailId) {
     matter_type: email.matter_type || 'Unknown',
     priority: email.priority || 'MEDIUM',
     status: 'new',
-    notes: email.body_preview || email.snippet || '',
+    notes: '',
     raw_preview: email.snippet || '',
     next_action: email.next_action || 'Reply to email',
     location: email.location || 'Unknown',
@@ -399,6 +503,8 @@ function importInboxEmail(emailId) {
 function dismissInboxEmail(emailId) {
   const email = app.inbox.find((e) => String(e.id) === String(emailId));
   if (!email) return;
+  const sourceMeta = getSourceMeta(email.source_account || app.inboxAccount || 'Inbox');
+  void logSecurityEvent('inbox.dismiss', String(email.id), { source: sourceMeta.key });
   app.inboxDismissed.add(email.id);
   persistInboxDismissed();
   renderInbox();
@@ -408,6 +514,8 @@ function dismissInboxEmail(emailId) {
 function undismissInboxEmail(emailId) {
   const email = app.inbox.find((e) => String(e.id) === String(emailId));
   if (!email) return;
+  const sourceMeta = getSourceMeta(email.source_account || app.inboxAccount || 'Inbox');
+  void logSecurityEvent('inbox.undismiss', String(email.id), { source: sourceMeta.key });
   app.inboxDismissed.delete(email.id);
   persistInboxDismissed();
   renderInbox();
@@ -480,13 +588,7 @@ async function syncAllMeaningfulStateRemote() {
 }
 
 function buildSourceLabel(source) {
-  const map = {
-    'jacquigriffin@mobilesolicitor.com.au': 'JGMS',
-    'hello@ntruralremotelegalservices.com.au': 'NTRRLS',
-    'Finchly/LawConnect': 'Finchly/LawConnect',
-    'SMS': 'SMS Forward'
-  };
-  return map[source] || source || 'Unknown';
+  return getSourceMeta(source).label;
 }
 
 function leadUrgencyClass(priority) {
@@ -504,10 +606,7 @@ function pillClass(priority) {
 }
 
 function sourcePillClass(source) {
-  if (source === 'jacquigriffin@mobilesolicitor.com.au') return 'source-jgms';
-  if (source === 'hello@ntruralremotelegalservices.com.au') return 'source-ntr';
-  if (source === 'Finchly/LawConnect') return 'source-fla';
-  return '';
+  return getSourceMeta(source).className;
 }
 
 function inferType(lead) {
@@ -521,9 +620,10 @@ function inferType(lead) {
 function renderLead(lead, index) {
   const id = getLeadId(lead, index);
   const state = getLeadState(id);
-  const source = lead.source_account || lead.source_platform || 'Unknown';
-  const sourceLabel = buildSourceLabel(source);
-  const phone = lead.sender_phone || lead.phone || (source === 'SMS' ? 'Check SMS app' : 'Unknown');
+  const source = getLeadSourceValue(lead);
+  const sourceMeta = getSourceMeta(source);
+  const sourceLabel = sourceMeta.label;
+  const phone = lead.sender_phone || lead.phone || (sourceMeta.key === 'sms' ? 'Check SMS app' : 'Unknown');
   const email = lead.sender_email || 'Unknown';
   const summary = lead.raw_preview || lead.notes || '';
   const date = formatLeadDate(lead.date_received);
@@ -548,7 +648,7 @@ function renderLead(lead, index) {
   const deleteAction = `<button class="btn btn-danger" type="button" data-delete-id="${escapeHtml(id)}">Delete lead</button>`;
   const actionMarkup = `<div class="actions">${callAction}${smsAction}${emailAction}${deleteAction}</div>`;
 
-  return `<div class="row ${rowClass}" data-id="${escapeHtml(id)}" data-source="${escapeHtml(source)}" data-date="${escapeHtml(date)}" data-urgency="${escapeHtml(priorityValue)}">
+  return `<div class="row ${rowClass}" data-id="${escapeHtml(id)}" data-source="${escapeHtml(sourceMeta.key)}" data-date="${escapeHtml(date)}" data-urgency="${escapeHtml(priorityValue)}">
     <div class="top">
       <div class="lead-heading">
         <div class="name">${escapeHtml(lead.sender_name || 'Unknown')}</div>
@@ -589,10 +689,15 @@ function updateSummary() {
 
 function updateSourceFilter() {
   const visibleLeads = getVisibleLeads();
-  const sources = Array.from(new Set(visibleLeads.map((lead) => lead.source_account || lead.source_platform || 'Unknown')));
+  const sources = Array.from(new Map(
+    visibleLeads.map((lead) => {
+      const meta = getSourceMeta(getLeadSourceValue(lead));
+      return [meta.key, meta.label];
+    })
+  ).entries());
   const current = els.sourceFilter.value || 'all';
-  els.sourceFilter.innerHTML = '<option value="all">All sources</option>' + sources.map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(buildSourceLabel(source))} (${escapeHtml(source)})</option>`).join('');
-  els.sourceFilter.value = sources.includes(current) ? current : 'all';
+  els.sourceFilter.innerHTML = '<option value="all">All sources</option>' + sources.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('');
+  els.sourceFilter.value = sources.some(([key]) => key === current) ? current : 'all';
 }
 
 function updateTabCounts() {
@@ -647,7 +752,9 @@ function render() {
   }
   const visibleLeads = getVisibleLeads();
   if (!visibleLeads.length) {
-    els.list.innerHTML = '<div class="empty">No leads available.</div>';
+    const authRequired = isSupabaseEnabled() && !app.session;
+    const emptyMsg = authRequired ? 'Sign in to view leads.' : 'No leads available.';
+    els.list.innerHTML = `<div class="empty">${escapeHtml(emptyMsg)}</div>`;
     updateSummary();
     updateTabCounts();
     filterRows();
@@ -693,6 +800,9 @@ function handleDeleteLead(target) {
   const row = target.closest('.row');
   const name = row?.querySelector('.name')?.textContent?.trim() || 'this lead';
   if (!window.confirm(`Delete ${name} from this tracker view?`)) return;
+  void logSecurityEvent('lead.hide_local', String(leadId), {
+    source: row?.dataset.source || 'unknown'
+  });
   setLeadState(leadId, { hidden: true });
   render();
   showNotice(`${name} deleted from this tracker view.`, 'info');
@@ -786,6 +896,7 @@ function attachEvents() {
     try {
       await app.supabase.auth.signOut();
       app.session = null;
+      app.hasLoggedLeadRead = false;
       app.authPanelOpen = false;
       showNotice('Signed out.', 'info');
       refreshAuthUi();
