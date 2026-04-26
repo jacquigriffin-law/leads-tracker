@@ -6,11 +6,12 @@
 // Returns { configured, inbox_accounts, emails } — each email is reduced to the
 // minimum triage/import fields needed by the UI, not full message content.
 //
-// AUTH: Requires a valid Supabase session JWT in the Authorization header.
+// AUTH: Requires a valid Supabase session access token in the Authorization header.
 //   Authorization: Bearer <supabase-access-token>
-// SUPABASE_JWT_SECRET must be set in Vercel env (Supabase Dashboard → Settings → API → JWT Secret).
+// Verification prefers SUPABASE_JWT_SECRET when configured, but can also verify
+// tokens by calling Supabase Auth directly using the public publishable key.
 // INBOX_ALLOWED_EMAILS must be set to a comma-separated list of permitted addresses.
-// Both vars are required — the endpoint returns 503 if either is absent (default-deny).
+// Missing authorisation config fails closed.
 
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
@@ -41,6 +42,25 @@ function verifyJwt(token, secret) {
     if (claims.nbf && claims.nbf > now) return null;
     if (claims.aud && claims.aud !== 'authenticated') return null;
     return claims;
+  } catch {
+    return null;
+  }
+}
+
+async function verifySupabaseTokenRemote(token) {
+  const supabaseUrl = process.env.SUPABASE_URL || 'https://lviislwimdvxuuvmvzfn.supabase.co';
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_LAfGPgLAjPLDt3uPmJncfg_Q_Wq3-wW';
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) return null;
+    const user = await res.json();
+    if (!user?.id || !user?.email) return null;
+    return { sub: user.id, email: user.email, aud: 'authenticated' };
   } catch {
     return null;
   }
@@ -221,20 +241,17 @@ module.exports = async (req, res) => {
   }
 
   // ── Authentication ──────────────────────────────────────────────────────────
-  // SUPABASE_JWT_SECRET must be set in Vercel env:
-  //   Supabase Dashboard → Settings → API → JWT Settings → JWT Secret
-  // Missing secret returns 503 (misconfiguration), not a silent open door.
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  if (!jwtSecret) {
-    audit('inbox.misconfigured', { ip: clientIp, error: 'SUPABASE_JWT_SECRET not set' });
-    return res.status(503).json({ error: 'Inbox temporarily unavailable.' });
-  }
-
+  // Prefer local JWT verification when SUPABASE_JWT_SECRET is configured. If the
+  // project uses Supabase's newer API key screen and the JWT secret is not
+  // readily available, fall back to Supabase Auth's /user verification endpoint.
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  const claims = token ? verifyJwt(token, jwtSecret) : null;
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+  const claims = token
+    ? (jwtSecret ? verifyJwt(token, jwtSecret) : await verifySupabaseTokenRemote(token))
+    : null;
   if (!claims) {
-    audit('inbox.auth_failed', { ip: clientIp });
+    audit('inbox.auth_failed', { ip: clientIp, jwtMode: jwtSecret ? 'local' : 'remote' });
     return res.status(401).json({ error: 'Authentication required.' });
   }
 
