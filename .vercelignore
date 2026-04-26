@@ -1,0 +1,27 @@
+# Do not deploy raw lead datasets or admin/support files.
+# Production should serve the app + API only.
+
+# Raw lead data / imports
+data.json
+leads.json
+supabase-import.sql
+
+# SQL/admin documentation
+*.sql
+*.mjs
+README.md
+SECURITY.md
+DEPLOY-CHECKLIST.md
+
+# Local/debug pages
+debug.html
+simple.html
+config.example.js
+
+# VCS and local files
+.git
+.gitignore
+.env
+.env.*
+node_modules
+.DS_Store

@@ -54,10 +54,12 @@ begin
 end;
 $$;
 
+drop trigger if exists leads_set_updated_at on public.leads;
 create trigger leads_set_updated_at
 before update on public.leads
 for each row execute function public.set_updated_at();
 
+drop trigger if exists lead_states_set_updated_at on public.lead_states;
 create trigger lead_states_set_updated_at
 before update on public.lead_states
 for each row execute function public.set_updated_at();
@@ -67,11 +69,18 @@ for each row execute function public.set_updated_at();
 alter table public.leads enable row level security;
 alter table public.lead_states enable row level security;
 
+-- Table privileges are kept narrow; RLS policies below still decide row access.
+revoke all on public.leads from anon, authenticated;
+revoke all on public.lead_states from anon, authenticated;
+grant select on public.leads to authenticated;
+grant select, insert, update, delete on public.lead_states to authenticated;
+
 -- PRODUCTION: email-whitelist RLS — only named addresses can read leads.
 -- Run supabase-rls-whitelist.sql (standalone script) to activate this policy
 -- and simultaneously drop the broad starter policy below.
 -- To verify which policy is active:
 --   select policyname from pg_policies where tablename = 'leads';
+drop policy if exists "whitelisted users can read leads" on public.leads;
 create policy "whitelisted users can read leads"
 on public.leads for select
 using (
@@ -97,19 +106,23 @@ using (
 -- No user can directly insert/update/delete leads — only service-role imports.
 -- This prevents a compromised session from modifying source records.
 
+drop policy if exists "authenticated users can read own lead state" on public.lead_states;
 create policy "authenticated users can read own lead state"
 on public.lead_states for select
 using (auth.uid() = user_id);
 
+drop policy if exists "authenticated users can insert own lead state" on public.lead_states;
 create policy "authenticated users can insert own lead state"
 on public.lead_states for insert
 with check (auth.uid() = user_id);
 
+drop policy if exists "authenticated users can update own lead state" on public.lead_states;
 create policy "authenticated users can update own lead state"
 on public.lead_states for update
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "authenticated users can delete own lead state" on public.lead_states;
 create policy "authenticated users can delete own lead state"
 on public.lead_states for delete
 using (auth.uid() = user_id);
@@ -142,13 +155,20 @@ create table if not exists public.lead_access_log (
 alter table public.lead_audit_log enable row level security;
 alter table public.lead_access_log enable row level security;
 
+revoke all on public.lead_audit_log from anon, authenticated;
+revoke all on public.lead_access_log from anon, authenticated;
+grant select on public.lead_audit_log to authenticated;
+grant select on public.lead_access_log to authenticated;
+
 -- Users can read their own audit entries; no user can write directly.
+drop policy if exists "users can read own audit log entries" on public.lead_audit_log;
 create policy "users can read own audit log entries"
 on public.lead_audit_log for select
 using (auth.uid() = user_id);
 
 -- Practice owner can read ALL audit log entries (cross-user review for compliance).
 -- Replace the email address with the practice principal's address.
+drop policy if exists "practice owner can read all audit log entries" on public.lead_audit_log;
 create policy "practice owner can read all audit log entries"
 on public.lead_audit_log for select
 using (
@@ -156,10 +176,12 @@ using (
     = 'jacquigriffin@mobilesolicitor.com.au'
 );
 
+drop policy if exists "users can read own access log entries" on public.lead_access_log;
 create policy "users can read own access log entries"
 on public.lead_access_log for select
 using (auth.uid() = user_id);
 
+drop policy if exists "practice owner can read all access log entries" on public.lead_access_log;
 create policy "practice owner can read all access log entries"
 on public.lead_access_log for select
 using (

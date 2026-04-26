@@ -16,7 +16,12 @@
 
 begin;
 
+alter table public.leads enable row level security;
+revoke all on public.leads from anon, authenticated;
+grant select on public.leads to authenticated;
+
 drop policy if exists "authenticated users can read leads" on public.leads;
+drop policy if exists "whitelisted users can read leads" on public.leads;
 
 create policy "whitelisted users can read leads"
 on public.leads for select

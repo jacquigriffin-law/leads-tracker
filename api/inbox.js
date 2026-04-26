@@ -23,6 +23,10 @@ function verifyJwt(token, secret) {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [header, payload, sig] = parts;
+    const decodedHeader = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
+    // Supabase access tokens for this app must be signed with HS256. Reject
+    // unexpected token types/algorithms instead of accepting any valid HMAC.
+    if (decodedHeader.alg !== 'HS256') return null;
     const expected = createHmac('sha256', secret)
       .update(`${header}.${payload}`)
       .digest('base64url');
@@ -31,7 +35,11 @@ function verifyJwt(token, secret) {
     const sigBuf = Buffer.from(sig);
     if (expectedBuf.length !== sigBuf.length || !timingSafeEqual(expectedBuf, sigBuf)) return null;
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (claims.exp && claims.exp < Math.floor(Date.now() / 1000)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (!claims.sub) return null;
+    if (claims.exp && claims.exp < now) return null;
+    if (claims.nbf && claims.nbf > now) return null;
+    if (claims.aud && claims.aud !== 'authenticated') return null;
     return claims;
   } catch {
     return null;
