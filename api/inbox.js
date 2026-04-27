@@ -117,6 +117,86 @@ function isRateLimited(key) {
   return entry.count > RATE_MAX;
 }
 
+// ── System/operational email filter ──────────────────────────────────────────
+// Excludes platform notifications, deployment alerts, and auth emails that are
+// clearly not legal enquiries. Conservative: when uncertain, keeps the email.
+// Never excludes Legal Aid, court, lawconnect, finchly, or personal enquiries.
+
+const _PROTECTED_LEAD_DOMAINS = new Set([
+  'legalaid.nsw.gov.au', 'lacmac.com.au', 'justice.nsw.gov.au',
+  'nt.gov.au', 'nt.legal.gov.au', 'naaja.com.au', 'ntlac.nt.gov.au',
+  'lawconnect.com.au', 'finchly.com.au',
+  'forward-sms.app',
+]);
+
+const _PROTECTED_SUBJECT_FRAGMENTS = [
+  'legal aid', 'lawconnect', 'finchly', 'court', 'hearing', 'family law', 'application', 'referral', 'grant of aid', 'sms from'
+];
+
+const _SYSTEM_DOMAINS = new Set([
+  'vercel.com', 'vercel.email',
+  'github.com', 'github.io', 'githubusercontent.com',
+  'supabase.io', 'supabase.com',
+  'atlassian.com', 'jira.com',
+  'sendgrid.net', 'amazonses.com',
+]);
+
+// Exact local-part matches that indicate automated/system senders.
+const _SYSTEM_LOCAL_PARTS = new Set([
+  'noreply', 'no-reply', 'no_reply',
+  'donotreply', 'do-not-reply', 'do_not_reply',
+  'notifications', 'notification',
+  'alerts', 'alert',
+  'automated', 'mailer-daemon', 'postmaster',
+  'bounces', 'bounce',
+]);
+
+// Subject fragments that strongly indicate system/automated mail (lowercased).
+const _SYSTEM_SUBJECT_FRAGMENTS = [
+  'deployment succeeded', 'deployment failed', 'deployment ready',
+  'deployment preview', 'your deployment', 'deployment to production',
+  'preview deployment', 'branch deployed', 'deploy preview',
+  'vercel: ', '[vercel]',
+  'supabase: ', '[supabase]',
+  '[github]', 'github notification',
+  'confirm your email address', 'verify your email', 'email verification',
+  'sign in to supabase', 'sign in to vercel', 'sign in to github',
+  'security alert: new sign-in', 'unusual sign-in', 'new device sign-in',
+  'calendar invitation', 'calendar invite',
+  'action required: verify your',
+];
+
+function isSystemEmail(fromEmail, subject) {
+  const addr = (fromEmail || '').toLowerCase().trim();
+  const subj = (subject || '').toLowerCase();
+  const atIdx = addr.lastIndexOf('@');
+  if (atIdx !== -1) {
+    const local = addr.slice(0, atIdx);
+    const domain = addr.slice(atIdx + 1);
+    for (const protectedDomain of _PROTECTED_LEAD_DOMAINS) {
+      if (domain === protectedDomain || domain.endsWith('.' + protectedDomain)) return false;
+    }
+    for (const protectedFrag of _PROTECTED_SUBJECT_FRAGMENTS) {
+      if (subj.includes(protectedFrag)) return false;
+    }
+    // Block by domain (exact or subdomain of blocked domain)
+    for (const blocked of _SYSTEM_DOMAINS) {
+      if (domain === blocked || domain.endsWith('.' + blocked)) return true;
+    }
+    // Block by local-part exact match or exact+separator variants
+    if (_SYSTEM_LOCAL_PARTS.has(local)) return true;
+    for (const name of _SYSTEM_LOCAL_PARTS) {
+      if (local.startsWith(name + '+') || local.startsWith(name + '.') ||
+          local.startsWith(name + '_') || local.startsWith(name + '-')) return true;
+    }
+  }
+  // Block by subject fragment
+  for (const frag of _SYSTEM_SUBJECT_FRAGMENTS) {
+    if (subj.includes(frag)) return true;
+  }
+  return false;
+}
+
 // ── Structured audit logging (captured by Vercel runtime logs) ────────────────
 function audit(event, details) {
   console.log(JSON.stringify({ audit: true, event, ts: new Date().toISOString(), ...details }));
@@ -369,6 +449,14 @@ module.exports = async (req, res) => {
     .flat()
     .sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
 
+  // Filter out system/operational emails (deployments, auth, platform notices).
+  // hidden_count is returned so the UI can note that filtering is active.
+  const leadEmails = allEmails.filter((e) => !isSystemEmail(e.from_email, e.subject));
+  const hiddenCount = allEmails.length - leadEmails.length;
+  if (hiddenCount > 0) {
+    audit('inbox.system_filtered', { ip: clientIp, user: authedUser, hidden_count: hiddenCount });
+  }
+
   // Return account labels only, not raw email addresses.
   const accounts = [
     jgmsOk ? 'JGMS' : null,
@@ -376,7 +464,7 @@ module.exports = async (req, res) => {
     ntrrlsOk ? 'NTRRLS' : null,
   ].filter(Boolean);
 
-  audit('inbox.fetch_done', { ip: clientIp, user: authedUser, email_count: allEmails.length });
+  audit('inbox.fetch_done', { ip: clientIp, user: authedUser, email_count: leadEmails.length, hidden_count: hiddenCount });
 
   return res.status(200).json({
     configured: true,
@@ -384,6 +472,8 @@ module.exports = async (req, res) => {
     inbox_account: accounts[0] || '',
     account: accounts[0] || '',
     last_checked: new Date().toISOString(),
-    emails: allEmails,
+    emails: leadEmails,
+    filtered_count: allEmails.length,
+    hidden_count: hiddenCount,
   });
 };

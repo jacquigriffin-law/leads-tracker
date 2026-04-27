@@ -71,6 +71,7 @@ const app = {
   inboxPrevUnread: -1,
   inboxLastChecked: null,
   inboxTransientError: false,
+  inboxHiddenCount: 0,
   expandedLeads: new Set(),
   hasLoggedLeadRead: false,
   aiTriageAvailable: false,
@@ -447,9 +448,11 @@ async function loadInbox() {
         app.inbox = json.emails;
         app.inboxAccount = json.inbox_account || json.account || 'Inbox';
         app.inboxAccounts = json.inbox_accounts || [app.inboxAccount];
+        app.inboxHiddenCount = typeof json.hidden_count === 'number' ? json.hidden_count : 0;
         app.inboxLive = true;
       } else {
         app.inbox = [];
+        app.inboxHiddenCount = 0;
         app.inboxLive = false;
       }
     } else if (response.status === 401 || response.status === 403) {
@@ -612,7 +615,10 @@ function renderInbox() {
   const staleBanner = (!app.inboxLive && app.inboxTransientError)
     ? '<div class="inbox-stale-note">Inbox temporarily unavailable \u2014 showing last loaded messages. Retrying automatically.</div>'
     : '';
-  let html = staleBanner + `<div class="inbox-header">Live inbox &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}. <em>Import as Lead</em> adds to tracker. <em>Dismiss</em> hides here only &mdash; email stays in your mailbox.</div>`;
+  const hiddenNote = app.inboxHiddenCount > 0
+    ? ` &mdash; <span title="System notifications, deployment alerts and auth emails are excluded automatically.">${app.inboxHiddenCount} system email${app.inboxHiddenCount !== 1 ? 's' : ''} filtered</span>`
+    : '';
+  let html = staleBanner + `<div class="inbox-header">Live inbox (likely leads) &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}${hiddenNote}. <em>Import as Lead</em> adds to tracker. <em>Dismiss</em> hides here only &mdash; email stays in your mailbox.</div>`;
 
   if (pending.length) {
     html += pending.map((e) => renderInboxEmail(e, false)).join('');
