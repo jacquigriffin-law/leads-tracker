@@ -66,7 +66,10 @@ const app = {
   inboxLastChecked: null,
   inboxTransientError: false,
   expandedLeads: new Set(),
-  hasLoggedLeadRead: false
+  hasLoggedLeadRead: false,
+  aiTriageAvailable: false,
+  aiTriageDrafts: {},
+  aiTriageLoading: new Set(),
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -395,6 +398,22 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = INBOX_API_TIMEOUT
   }
 }
 
+// ── AI triage availability probe ─────────────────────────────────────────────
+// Called once on hydrate. Uses the GET probe (no auth needed) to check whether
+// all three env gates are set on this deployment. The actual triage POST
+// requires authentication; the button is hidden when the feature is off.
+async function probeAiTriage() {
+  try {
+    const res = await fetchWithTimeout('/api/ai-triage', {}, 3000);
+    if (res.ok) {
+      const json = await res.json();
+      app.aiTriageAvailable = json.available === true;
+    }
+  } catch {
+    app.aiTriageAvailable = false;
+  }
+}
+
 async function loadInbox() {
   // Don't poll without a valid session — pre-auth requests cause 401s that wipe inbox
   if (!app.session?.access_token) {
@@ -506,9 +525,32 @@ function renderInboxEmail(email, isDismissed = false) {
   const sourceMetaPill = isDismissed
     ? '<span class="inbox-meta-pill dismissed-pill">Dismissed locally</span>'
     : `<span class="inbox-meta-pill">${escapeHtml(email.source_label || 'Email')}</span>`;
+  const emailIdEsc = escapeHtml(String(email.id));
+  const isLoading = app.aiTriageLoading.has(String(email.id));
+  const aiTriageBtn = (!isDismissed && app.aiTriageAvailable)
+    ? (isLoading
+      ? `<button class="btn-ai-triage" type="button" disabled>Analysing\u2026</button>`
+      : `<button class="btn-ai-triage" type="button" data-triage-id="${emailIdEsc}">AI Triage</button>`)
+    : '';
   const actionButtons = isDismissed
-    ? `<button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button><button class="btn-restore" type="button" data-restore-id="${escapeHtml(String(email.id))}">&#x21BA; Restore</button>`
-    : `<button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button><button class="btn-dismiss" type="button" data-dismiss-id="${escapeHtml(String(email.id))}">Dismiss</button>`;
+    ? `<button class="btn-import" type="button" data-import-id="${emailIdEsc}">&#x2192; Import as Lead</button><button class="btn-restore" type="button" data-restore-id="${emailIdEsc}">&#x21BA; Restore</button>`
+    : `<button class="btn-import" type="button" data-import-id="${emailIdEsc}">&#x2192; Import as Lead</button><button class="btn-dismiss" type="button" data-dismiss-id="${emailIdEsc}">Dismiss</button>${aiTriageBtn}`;
+
+  const draft = app.aiTriageDrafts[String(email.id)];
+  const MATTER_LABELS = { family_law: 'Family Law', property: 'Property', criminal: 'Criminal', estate: 'Estate', employment: 'Employment', immigration: 'Immigration', other: 'Other', unclear: 'Unclear' };
+  const draftPanel = draft
+    ? `<div class="ai-triage-panel">
+        <div class="ai-triage-warning">AI triage hint \u2014 practitioner review required before acting on this.</div>
+        <div class="ai-triage-fields">
+          <span class="ai-triage-field">Matter: <strong>${escapeHtml(MATTER_LABELS[draft.matter_type_guess] || draft.matter_type_guess)}</strong></span>
+          <span class="ai-triage-field">Urgency: <strong>${escapeHtml(draft.urgency_guess)}</strong></span>
+          ${draft.location_mentioned ? `<span class="ai-triage-field">Location: <strong>${escapeHtml(draft.location_mentioned)}</strong></span>` : ''}
+        </div>
+        <div class="ai-triage-review-note">${escapeHtml(draft.human_review_warning)}</div>
+        <button class="btn-clear-triage" type="button" data-clear-triage="${emailIdEsc}">Clear draft</button>
+      </div>`
+    : '';
+
   return `<div class="inbox-card${urgentClass}${dismissedCardClass}">
     <div class="inbox-from">
       <div class="inbox-avatar">${initials}</div>
@@ -529,6 +571,7 @@ function renderInboxEmail(email, isDismissed = false) {
     <div class="actions">
       ${actionButtons}
     </div>
+    ${draftPanel}
   </div>`;
 }
 
@@ -644,6 +687,61 @@ function undismissInboxEmail(emailId) {
 function toggleInboxShowDismissed() {
   app.inboxShowDismissed = !app.inboxShowDismissed;
   persistInboxShowDismissed();
+  renderInbox();
+}
+
+// ── AI triage actions ─────────────────────────────────────────────────────────
+async function triageInboxEmail(emailId) {
+  const email = app.inbox.find((e) => String(e.id) === String(emailId));
+  if (!email || !app.session?.access_token) return;
+
+  // Show loading state
+  app.aiTriageLoading.add(String(emailId));
+  renderInbox();
+
+  try {
+    const res = await fetchWithTimeout('/api/ai-triage', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${app.session.access_token}`,
+      },
+      body: JSON.stringify({
+        email_id: String(email.id),
+        subject: email.subject || '',
+        snippet: email.snippet || '',
+        source_label: email.source_label || '',
+      }),
+    }, 12000);
+
+    const json = await res.json().catch(() => null);
+
+    if (res.ok && json?.ok && json?.extraction) {
+      app.aiTriageDrafts[String(emailId)] = json.extraction;
+      void logSecurityEvent('inbox.ai_triage_complete', String(email.id), {
+        source: getSourceMeta(email.source_account || '').key,
+        matter_type: json.extraction.matter_type_guess,
+        urgency: json.extraction.urgency_guess,
+      });
+    } else if (res.status === 422) {
+      showNotice('AI triage blocked: this email contains patterns that prevent processing.', 'error');
+    } else if (res.status === 503) {
+      showNotice('AI triage is not configured on this deployment.', 'info');
+      app.aiTriageAvailable = false;
+    } else {
+      const msg = json?.error || 'AI extraction failed. Try again later.';
+      showNotice(msg, 'error');
+    }
+  } catch {
+    showNotice('AI triage request timed out. Try again.', 'error');
+  } finally {
+    app.aiTriageLoading.delete(String(emailId));
+    renderInbox();
+  }
+}
+
+function clearAiTriage(emailId) {
+  delete app.aiTriageDrafts[String(emailId)];
   renderInbox();
 }
 
@@ -1058,6 +1156,7 @@ async function hydrate() {
   loadLocalState();
   await loadLeads();
   await loadInbox();
+  void probeAiTriage();
   syncHeroFilterFromUrl();
   migrateLegacyState();
   if (app.supabase && app.session) {
@@ -1645,6 +1744,8 @@ function attachEvents() {
     if (event.target.matches('button[data-dismiss-id]')) { dismissInboxEmail(event.target.dataset.dismissId); return; }
     if (event.target.matches('button[data-restore-id]')) { undismissInboxEmail(event.target.dataset.restoreId); return; }
     if (event.target.matches('button[data-toggle-dismissed]')) { toggleInboxShowDismissed(); return; }
+    if (event.target.matches('button[data-triage-id]')) { void triageInboxEmail(event.target.dataset.triageId); return; }
+    if (event.target.matches('button[data-clear-triage]')) { clearAiTriage(event.target.dataset.clearTriage); return; }
 
     const callBtn = event.target.closest('button[data-call-phone]');
     if (callBtn) {

@@ -195,3 +195,52 @@ LLM output is a triage hint only. No extracted field (matter type, urgency, loca
 | `api/lib/email-privacy.js` | Reusable server-side utilities: `minimiseBody`, `redactPii`, `detectInjection`, `buildLlmInput`, `validateLlmOutput`, `LLM_EXTRACTION_SCHEMA` |
 | `supabase-llm-audit.sql` | `llm_processing_log` table, RLS, security-definer insert function, retention guidance |
 | `scripts/test-email-privacy.js` | Verification script — exercises all privacy utilities against sample emails including prompt-injection text |
+
+---
+
+## Live OpenAI extraction — gated feature (Round 6)
+
+### What was added
+
+`api/ai-triage.js` — serverless POST endpoint that classifies one inbox item using OpenAI Chat Completions and returns triage hints for practitioner review. **Fail-closed**: all three policy env vars must be set before any LLM call is attempted. Missing any one returns HTTP 503 immediately.
+
+### Env gates (all required)
+
+| Var | Required value | Purpose |
+|---|---|---|
+| `LLM_PROVIDER` | `openai` | Explicit opt-in to OpenAI — any other value disables the endpoint |
+| `LLM_POLICY_CONFIRMED` | `true` (exact string) | Explicit acknowledgement that the LLM data-handling policy has been reviewed |
+| `OPENAI_API_KEY` | your key | Authenticates requests to the OpenAI API — never in `config.js` |
+| `OPENAI_MODEL` | optional | Model to use (default: `gpt-4o-mini`) |
+
+None of these values are reflected in error responses. A 503 says only "AI triage is not configured on this deployment."
+
+### Security controls
+
+- **Same auth as `/api/inbox`**: Bearer JWT + `INBOX_ALLOWED_EMAILS` allowlist. 401 on bad JWT, 403 on unlisted email, 503 if allowlist env var is absent.
+- **Tighter rate limit**: 5 requests per IP per 60 seconds (compared to 10 for inbox reads — each call is billable).
+- **Full privacy pipeline on every request**: `buildLlmInput()` runs minimise → detectInjection → redactPii regardless of whether `/api/inbox` already processed the snippet. This is defence-in-depth against client-side tampering.
+- **Abort on injection risk**: If `detectInjection()` fires, the endpoint returns 422 with no LLM call. The event is audited to Vercel logs and logged to `llm_processing_log` with `injection_risk_detected=true`.
+- **`store: false`**: Included in every OpenAI Chat Completions request to request no API-side conversation retention.
+- **Closed JSON schema**: `response_format` sent to OpenAI uses `json_schema` with `additionalProperties: false`, aligned exactly with `LLM_EXTRACTION_SCHEMA`. `requires_human_review` is a required boolean field; the schema constrains the response at the API level before `validateLlmOutput()` validates it again server-side.
+- **Output validation**: `validateLlmOutput()` checks every response. Extra fields, unknown enum values, or `requires_human_review !== true` → 502 with audit event. The LLM cannot set `requires_human_review` to false without the response being rejected.
+- **from_name / from_email isolation**: Accepted in the request body for audit context only. They are explicitly excluded from the LLM prompt — identity information never reaches the AI provider.
+- **No auto-send**: The extraction returns a triage draft only. No email action, lead creation, or external send occurs.
+- **Supabase audit log**: Every successful extraction is logged to `llm_processing_log` via `log_llm_processing()` security-definer RPC. Blocked and error events are audited to Vercel runtime logs. No raw email content or PII is stored in either log.
+
+### Deployment checklist for this feature
+
+- [ ] Review OpenAI data processing terms; confirm `LLM_POLICY_CONFIRMED=true` is appropriate for this practice
+- [ ] Add `LLM_PROVIDER=openai` to Vercel env (all environments where you want this feature active)
+- [ ] Add `LLM_POLICY_CONFIRMED=true` to Vercel env
+- [ ] Add `OPENAI_API_KEY=<your-key>` to Vercel env — **never commit this to the repo**
+- [ ] Optionally add `OPENAI_MODEL` (default is `gpt-4o-mini`)
+- [ ] Confirm `supabase-llm-audit.sql` has been run in Supabase SQL editor (`llm_processing_log` table)
+- [ ] To leave the feature off: do not set these env vars — the endpoint returns 503 and no UI should call it
+
+### Files added in Round 6
+
+| File | Purpose |
+|---|---|
+| `api/ai-triage.js` | Gated POST endpoint: policy gate → JWT auth → allowlist → privacy pipeline → OpenAI Chat Completions → output validation → Supabase audit log |
+| `scripts/test-ai-triage.js` | Verification script — policy guard logic, injection abort path, output schema enforcement, enum alignment (no real OpenAI calls) |

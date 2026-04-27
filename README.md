@@ -130,6 +130,70 @@ Each email in the combined inbox carries a `mailbox` key (`jgms` / `fla` / `ntrr
 - Inbox responses are minimised for triage. They return snippets only, not full message bodies.
 - Inbox-imported leads store the snippet once in `raw_preview`; they do not duplicate it into `notes`.
 
+## AI extraction (`/api/ai-triage`)
+
+Optional serverless endpoint that classifies one inbox item using OpenAI. **Disabled by default** — the endpoint returns 503 until all three policy env vars are explicitly set.
+
+### Required env vars
+
+| Env var | Required value | Purpose |
+|---|---|---|
+| `LLM_PROVIDER` | `openai` | Selects the AI provider — only `openai` is accepted |
+| `LLM_POLICY_CONFIRMED` | `true` | Explicit operator acknowledgement that the AI policy has been reviewed |
+| `OPENAI_API_KEY` | your key | OpenAI API key — never put this in `config.js` |
+| `OPENAI_MODEL` | `gpt-4o-mini` (default) | Model to use — defaults to `gpt-4o-mini` if unset |
+
+All four vars must be set in **Vercel env** (not `config.js`). If any of the first three are absent or wrong, the endpoint returns HTTP 503 immediately.
+
+### Auth
+
+Same JWT + `INBOX_ALLOWED_EMAILS` allowlist as `/api/inbox`. Default-deny: missing or empty `INBOX_ALLOWED_EMAILS` returns 503.
+
+### What is sent to OpenAI
+
+Only the minimised, PII-redacted snippet, the redacted subject line, and the source label (e.g. `FLA`). The following are **never** sent:
+
+- Full email bodies or attachments
+- `from_name` or `from_email` (accepted in the request body for audit logging only)
+- Any un-redacted phone numbers, email addresses, ABNs, TFNs, or URLs
+- Items where `injection_risk: true` was flagged by the inbox API
+
+### `store: false`
+
+Every OpenAI call includes `store: false`, requesting that OpenAI not retain the conversation in its API history.
+
+### Output
+
+Returns a validated triage object:
+
+```json
+{
+  "extraction": {
+    "matter_type_guess": "family_law",
+    "urgency_guess": "urgent",
+    "location_mentioned": "NSW",
+    "requires_human_review": true,
+    "human_review_warning": "Triage hint only. Practitioner review required before acting."
+  },
+  "meta": {
+    "model": "gpt-4o-mini",
+    "store": false,
+    "redacted_pii": true,
+    "injection_risk": false,
+    "requires_human_review": true
+  }
+}
+```
+
+`requires_human_review` is always `true`. The endpoint never sends a reply or takes any action — it returns a draft for practitioner review only.
+
+### Safety rules
+
+1. If `injection_risk: true` is set on the inbox item, **do not call this endpoint**. The server will also abort and log the attempt if an injected snippet reaches it.
+2. Output must not be actioned without practitioner review — it is a triage hint only.
+3. All LLM call metadata is logged to `llm_processing_log` in Supabase via the `log_llm_processing()` security-definer RPC. No raw email content or PII is stored in that table.
+4. Rate-limited to 5 requests per IP per minute (lower than inbox because each call is billable).
+
 ## Data handling, retention, and AI
 
 ### No raw email data to LLMs

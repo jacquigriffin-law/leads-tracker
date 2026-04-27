@@ -18,6 +18,9 @@ debug.html
 simple.html
 config.example.js
 
+# Test and build scripts — not deployed
+scripts/
+
 # VCS and local files
 .git
 .gitignore
