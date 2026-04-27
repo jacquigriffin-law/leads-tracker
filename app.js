@@ -462,13 +462,17 @@ async function loadInbox() {
       app.inboxLive = false;
       app.inboxTransientError = true;
     } else {
-      // Other server error — preserve last good inbox
+      // Other server error — preserve last good inbox and do not show the
+      // misleading "not configured" message. The API may be temporarily
+      // failing even when Vercel env vars are present.
       app.inboxLive = false;
+      app.inboxAuthRequired = isSupabaseEnabled();
       app.inboxTransientError = true;
     }
   } catch {
-    // Network/timeout — preserve last good inbox
+    // Network/timeout — preserve last good inbox and keep auth/config state.
     app.inboxLive = false;
+    app.inboxAuthRequired = isSupabaseEnabled();
     app.inboxTransientError = true;
   }
 
@@ -584,10 +588,14 @@ function renderInboxEmail(email, isDismissed = false) {
 function renderInbox() {
   if (!app.inboxLive && !app.inbox.length) {
     let msg;
-    if (app.inboxAuthRequired && app.inboxTransientError) {
-      msg = 'Inbox temporarily unavailable \u2014 your session may be refreshing. Will retry automatically.';
-    } else if (app.inboxAuthRequired) {
-      msg = 'Sign in to access the live inbox.';
+    if (app.inboxTransientError) {
+      msg = app.session?.user?.email
+        ? `Inbox temporarily unavailable for ${escapeHtml(app.session.user.email)}. The tracker is signed in and will retry automatically. Tap Update tracker now, or reopen in Safari if this persists.`
+        : 'Inbox temporarily unavailable — your session may be refreshing. Will retry automatically.';
+    } else if (app.inboxAuthRequired || isSupabaseEnabled()) {
+      msg = app.session?.user?.email
+        ? `Signed in as ${escapeHtml(app.session.user.email)}. Inbox is loading — tap Update tracker now if it does not refresh.`
+        : 'Sign in to access the live inbox.';
     } else {
       msg = 'Inbox not configured. Set JGMS_EMAIL + Azure credentials, FLA_EMAIL + FLA_IMAP_PASSWORD, or NTRRLS_EMAIL + NTRRLS_IMAP_PASSWORD in Vercel environment variables to enable live inbox.';
     }
