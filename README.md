@@ -18,6 +18,8 @@ This keeps the current static tracker workflow, but adds an optional Supabase mo
 - `app.js` - data loading, filtering, rendering, local/Supabase sync
 - `config.example.js` - copy to `config.js` and fill in values
 - `supabase-schema.sql` - tables, RLS, policies, trigger
+- `supabase-retention.sql` - archive table, dry-run report, purge functions, optional pg_cron schedules
+- `supabase-llm-audit.sql` - LLM processing audit log table
 - `generate-supabase-import.mjs` - converts `data.json` into SQL inserts
 
 ## Local mode
@@ -130,7 +132,7 @@ Each email in the combined inbox carries a `mailbox` key (`jgms` / `fla` / `ntrr
 - Inbox responses are minimised for triage. They return snippets only, not full message bodies.
 - Inbox-imported leads store the snippet once in `raw_preview`; they do not duplicate it into `notes`.
 
-## AI extraction (`/api/ai-triage`)
+## AI extraction (`/api/ai-extract`)
 
 Optional serverless endpoint that classifies one inbox item using OpenAI. **Disabled by default** — the endpoint returns 503 until all three policy env vars are explicitly set.
 
@@ -194,6 +196,30 @@ Returns a validated triage object:
 3. All LLM call metadata is logged to `llm_processing_log` in Supabase via the `log_llm_processing()` security-definer RPC. No raw email content or PII is stored in that table.
 4. Rate-limited to 5 requests per IP per minute (lower than inbox because each call is billable).
 
+
+## Retention/archive automation (`supabase-retention-automation.sql`)
+
+LeadFlow includes a manual-to-automated Supabase retention workflow for the policy approved on 28 Apr 2026. Run `supabase-retention-automation.sql` in Supabase SQL Editor before enabling the optional pg_cron schedules.
+
+What it does:
+
+- Creates `lead_retention_archive`, a privacy-minimised archive register.
+- Provides `retention_review_candidates(interval '90 days')` for dry-run review.
+- Provides `run_lead_retention_archive(interval '90 days', false)` for non-destructive archive-only processing.
+- Allows deletion only if deliberately called with `p_delete_after_archive=true`.
+- Never archives/deletes active, new, actioned, LEAP, or Legal Aid accepted matters.
+- Provides `purge_expired_leadflow_logs(interval '12 months')` for access/audit/LLM log retention.
+
+Recommended first run:
+
+```sql
+select * from public.retention_review_candidates(interval '90 days');
+select * from public.run_lead_retention_archive(interval '90 days', false);
+select * from public.purge_expired_leadflow_logs(interval '12 months');
+```
+
+The pg_cron schedule in the SQL file is commented out by default. Enable it only after Jacqui has reviewed the first dry-run and confirmed the archive behaviour.
+
 ## Data handling, retention, and AI
 
 ### No raw email data to LLMs
@@ -238,9 +264,24 @@ Any LLM integration must return only the fields defined in `LLM_EXTRACTION_SCHEM
 
 ### Retention
 
-- Declined / no-action leads: 12 months
-- Actioned leads that become matter records: retain per matter-file rules, typically 7 years after closure
-- Audit logs (`lead_audit_log`, `lead_access_log`, `llm_processing_log`): 7 years minimum (NSW LPU Rule 14)
+Approved policy (reviewed 2026-04-28):
+
+| Data category | Retention |
+|---|---|
+| Leads — status `new` / `active` | Kept while active; never auto-archived |
+| Leads — status `actioned` | Kept as matter record; 7 years after matter closure |
+| Leads — `declined` / `no_action` / `not_suitable` | Archived after 90 days (if no actioned lead_state); purgeable after 365 days |
+| Audit / access / LLM logs | 12 months (confirm with legal advisor before purging) |
+| Raw email bodies | Never stored — enforced at API layer |
+
+Run `supabase-retention.sql` in the Supabase SQL Editor to create the archive table and functions:
+
+1. `select * from public.retention_report();` — dry run, read-only
+2. `select public.archive_expired_leads();` — move eligible leads to archive
+3. `select public.purge_archived_leads();` — permanently delete from archive (default 365 days)
+4. `select public.purge_expired_logs();` — trim audit/access/LLM logs (default 12 months)
+
+Optional pg_cron schedules are included in that file (commented out — enable after review).
 
 See `SECURITY.md` for the full hardening note, LLM privacy pipeline, blocker list, and residual risks.
 

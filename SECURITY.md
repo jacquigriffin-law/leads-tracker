@@ -62,6 +62,23 @@
 | `vercel.json` | Added `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, and `X-Robots-Tag: noindex, nofollow, noarchive`. | Reduced framing / cross-origin exposure and reduced accidental indexing of the app. |
 | `README.md` | Added production-safe posture, AI/data-handling notes, retention guidance, and pointer to `SECURITY.md`. | Setup docs previously under-explained what must stay private and how long data should be kept. |
 
+### Round 7 changes — Retention & archive automation (2026-04-28)
+
+| File | What changed | Risk addressed |
+|---|---|---|
+| `supabase-retention.sql` | New SQL file. Creates `leads_archive` table (RLS: practice owner read-only). Four functions: `retention_report()` (dry-run, read-only); `archive_expired_leads()` (moves declined/no_action/not_suitable leads ≥90 days old with no actioned state to archive, then cascades delete from `leads`); `purge_archived_leads(days)` (permanent delete from archive, min 90-day guard); `purge_expired_logs(months)` (trims audit/access/LLM log tables, min 12 months, skips `llm_processing_log` gracefully if absent). Commented-out pg_cron schedules at 18:00 UTC (04:00 AEST). No service key required. | Retention policy was documented but had no runnable implementation. Manual deletion was the only option and carried high risk of accidentally removing actioned leads. |
+| `README.md` | Added `supabase-retention.sql` to Files list; expanded Retention section with approved policy table and step-by-step function usage. | Retention steps were undocumented for operators. |
+
+**Retention policy approved 2026-04-28:**
+
+| Data category | Retention |
+|---|---|
+| Leads — `new` / `active` | Kept while active; never auto-archived |
+| Leads — `actioned` | Kept as matter record; 7 years after matter closure |
+| Leads — `declined` / `no_action` / `not_suitable` | Archived after 90 days (no actioned state), purgeable after 365 days |
+| Audit / access / LLM logs | 12 months — **confirm with legal advisor before scheduling automatic purge; SECURITY.md previously cited 7 years under NSW LPU Rule 14** |
+| Raw email bodies | Never stored — enforced at API layer |
+
 ---
 
 ## Blockers — decisions required by Jacqui / Moe
@@ -89,7 +106,10 @@
 6. **[Within 1 week]** Disable Supabase public sign-up (B4).
 7. **[Within 2 weeks]** Review Vercel logs to confirm `inbox.access` and `inbox.auth_denied` events appear correctly (B5).
 8. **[Within 1 month]** Rewrite git history to remove PII files (B6) and rotate anon key (B7).
-9. **[Within 3 months]** Enable the `pg_cron` retention schedule from `supabase-schema.sql` for declined/no_action leads.
+9. **[Within 1 month]** Run `supabase-retention.sql` in Supabase SQL Editor to create the archive table and retention functions.
+10. **[Within 1 month]** Run `select * from public.retention_report();` to preview what the archive functions would do — no data is changed.
+11. **[Within 3 months]** After confirming the report looks correct, run `select public.archive_expired_leads();` to begin archiving expired leads.
+12. **[Within 3 months]** Optionally enable the pg_cron schedules in `supabase-retention.sql` (all commented out — enable after review; Supabase Dashboard → Database → Extensions → pg_cron).
 
 ---
 
@@ -131,7 +151,7 @@
 - [ ] **RLS whitelist deployed** (B3) — run `supabase-rls-whitelist.sql` in Supabase SQL editor
 - [ ] **Data breach assessment documented in writing** — assess the prior public accessibility of data.json/leads.json against the NDB Scheme criteria; record the assessment outcome regardless of conclusion
 - [ ] **Supabase data residency confirmed** — check `ap-southeast-2` in Supabase Dashboard → Settings → Infrastructure; note in practice data register
-- [ ] **Retention schedule set** — implement pg_cron from `supabase-schema.sql` or set a calendar reminder for annual manual review; ensure actioned leads are excluded from the 12-month purge
+- [ ] **Retention automation deployed** — run `supabase-retention.sql` in Supabase SQL editor; call `retention_report()` first (dry run); then `archive_expired_leads()` when ready; optionally enable pg_cron schedules; ensure actioned leads are never purged
 
 ---
 
@@ -174,7 +194,7 @@ Both flags are set by `api/lib/email-privacy.js` at response-build time. The liv
 - Least-privilege: `authenticated` role has SELECT only; inserts flow through `log_llm_processing()` (security definer).
 - RLS: each user reads their own rows; practice owner reads all rows.
 - `requires_human_review` is set to `true` by the insert function regardless of caller input.
-- Retention: 7 years minimum (NSW LPU Rule 14).
+- Retention: approved operational policy is 12 months (see Round 7 above); NSW LPU Rule 14 references 7 years — confirm with legal advisor before scheduling automatic purges. Purged via `purge_expired_logs()` in `supabase-retention.sql`.
 - Never stores raw email content or extracted PII — summaries and metadata only.
 
 ### Prompt-injection protection
@@ -244,3 +264,18 @@ None of these values are reflected in error responses. A 503 says only "AI triag
 |---|---|
 | `api/ai-triage.js` | Gated POST endpoint: policy gate → JWT auth → allowlist → privacy pipeline → OpenAI Chat Completions → output validation → Supabase audit log |
 | `scripts/test-ai-triage.js` | Verification script — policy guard logic, injection abort path, output schema enforcement, enum alignment (no real OpenAI calls) |
+
+---
+
+## Automated retention/archive — gated database workflow
+
+`supabase-retention-automation.sql` implements the approved LeadFlow retention policy as a Supabase-side workflow. It is intentionally staged:
+
+1. **Dry-run first:** `retention_review_candidates(interval '90 days')` shows candidates without changing data.
+2. **Archive-only default:** `run_lead_retention_archive(interval '90 days', false)` writes privacy-minimised records to `lead_retention_archive` and leaves source leads in place.
+3. **Explicit deletion only:** source rows are deleted only if the function is deliberately called with `p_delete_after_archive=true`.
+4. **Active/matter safety:** candidates exclude new, active, actioned, LEAP, and Legal Aid accepted matters.
+5. **Log retention:** `purge_expired_leadflow_logs(interval '12 months')` removes old access/audit/LLM logs in line with the approved restricted-intake policy.
+6. **Optional automation:** pg_cron schedules are provided but commented out until the first review is confirmed.
+
+The archive table deliberately excludes `draft_reply`, `raw_preview`, `notes`, `sender_email`, `sender_phone`, and `opposing_party` to avoid retaining unnecessary client PII.
