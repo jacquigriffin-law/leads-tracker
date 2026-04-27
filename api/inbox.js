@@ -48,9 +48,21 @@ function verifyJwt(token, secret) {
   }
 }
 
+function decodeJwtPayloadUnsafe(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 async function verifySupabaseTokenRemote(token) {
   const supabaseUrl = process.env.SUPABASE_URL || 'https://lviislwimdvxuuvmvzfn.supabase.co';
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_LAfGPgLAjPLDt3uPmJncfg_Q_Wq3-wW';
+
+  // First try the canonical Auth endpoint.
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
       headers: {
@@ -58,10 +70,30 @@ async function verifySupabaseTokenRemote(token) {
         Authorization: `Bearer ${token}`,
       },
     });
+    if (res.ok) {
+      const user = await res.json();
+      if (user?.id && user?.email) return { sub: user.id, email: user.email, aud: 'authenticated', verifiedVia: 'auth-user' };
+    }
+  } catch {
+    // Fall through to REST validation below.
+  }
+
+  // Fallback for Supabase projects where /auth/v1/user rejects the newer
+  // publishable key format from serverless functions. This still validates the
+  // bearer token with Supabase: a forged/expired token will be rejected by REST.
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/leads?select=id&limit=1`, {
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${token}`,
+      },
+    });
     if (!res.ok) return null;
-    const user = await res.json();
-    if (!user?.id || !user?.email) return null;
-    return { sub: user.id, email: user.email, aud: 'authenticated' };
+    const claims = decodeJwtPayloadUnsafe(token);
+    if (!claims?.sub) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (claims.exp && claims.exp < now) return null;
+    return { sub: claims.sub, email: claims.email || claims.user_metadata?.email || null, aud: claims.aud || 'authenticated', verifiedVia: 'rest' };
   } catch {
     return null;
   }
