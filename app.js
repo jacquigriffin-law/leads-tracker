@@ -8,7 +8,13 @@ const INBOX_IMPORTED_KEY = 'xena-leads-inbox-imported';
 const INBOX_DISMISSED_KEY = 'xena-leads-inbox-dismissed';
 const INBOX_SHOW_DISMISSED_KEY = 'xena-leads-inbox-show-dismissed';
 const PENDING_HERO_FILTER_KEY = 'xena-leads-pending-hero-filter';
-const DEFAULT_CONFIG = { supabase: { enabled: false, url: '', anonKey: '' } };
+const DEFAULT_CONFIG = {
+  supabase: {
+    enabled: true,
+    url: 'https://lviislwimdvxuuvmvzfn.supabase.co',
+    anonKey: 'sb_publishable_LAfGPgLAjPLDt3uPmJncfg_Q_Wq3-wW'
+  }
+};
 const INBOX_POLL_MS = 45_000;
 const INBOX_API_TIMEOUT_MS = 4000;
 
