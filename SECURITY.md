@@ -132,3 +132,66 @@
 - [ ] **Data breach assessment documented in writing** — assess the prior public accessibility of data.json/leads.json against the NDB Scheme criteria; record the assessment outcome regardless of conclusion
 - [ ] **Supabase data residency confirmed** — check `ap-southeast-2` in Supabase Dashboard → Settings → Infrastructure; note in practice data register
 - [ ] **Retention schedule set** — implement pg_cron from `supabase-schema.sql` or set a calendar reminder for annual manual review; ensure actioned leads are excluded from the 12-month purge
+
+---
+
+## LLM / AI privacy controls (Round 5)
+
+### Policy statement
+
+**No full email bodies or attachments are ever sent to an LLM.** Emails are treated as untrusted data sources. Any future AI integration must follow the pipeline below without exception.
+
+### Required pipeline for any LLM processing of email or lead data
+
+```
+Raw email body
+  → minimiseBody()      — strip quotes, signatures, truncate to ≤300 chars
+  → detectInjection()   — abort if prompt-injection patterns detected; log the block
+  → redactPii()         — replace phone, email, ABN, TFN, URLs with typed placeholders
+  → LLM prompt          — subject + redacted snippet only; no names, no full content
+  → validateLlmOutput() — enforce JSON extraction schema; reject any extra fields
+  → Human review        — practitioner must review before any output is actioned
+  → log_llm_processing() — log to llm_processing_log (metadata only, no PII)
+```
+
+All utilities are in `api/lib/email-privacy.js`. The JSON extraction schema (`LLM_EXTRACTION_SCHEMA`) defines the only fields an LLM may return. `requires_human_review` is enforced as `true` at both the schema and database insert level.
+
+### What the inbox API exposes
+
+`/api/inbox` returns per-email flags alongside each message:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `injection_risk` | `boolean` | True if the snippet triggered a prompt-injection pattern. Do not send to an LLM. |
+| `redacted_pii` | `boolean` | True if PII (phone, email, ABN, TFN, URL) was detected in the snippet. |
+
+Both flags are set by `api/lib/email-privacy.js` at response-build time. The live inbox response never contains full bodies or attachments.
+
+### Audit log
+
+`supabase-llm-audit.sql` provisions the `llm_processing_log` table:
+
+- Least-privilege: `authenticated` role has SELECT only; inserts flow through `log_llm_processing()` (security definer).
+- RLS: each user reads their own rows; practice owner reads all rows.
+- `requires_human_review` is set to `true` by the insert function regardless of caller input.
+- Retention: 7 years minimum (NSW LPU Rule 14).
+- Never stores raw email content or extracted PII — summaries and metadata only.
+
+### Prompt-injection protection
+
+Emails are untrusted input. Common injection patterns (e.g. "ignore previous instructions", "act as", INST tokens, im_start tokens) are blocked before any LLM call. Blocked events are audited with `inbox.injection_risk_detected` in Vercel runtime logs.
+
+### Human-review requirement
+
+LLM output is a triage hint only. No extracted field (matter type, urgency, location) may be acted upon without practitioner review and sign-off. This requirement is:
+- Documented in `LLM_EXTRACTION_SCHEMA` (`requires_human_review: true`, `const: true`)
+- Enforced at the database layer (`log_llm_processing()` always sets `requires_human_review = true`)
+- Displayed to the user via the `human_review_warning` field in validated LLM output
+
+### Files added in Round 5
+
+| File | Purpose |
+|---|---|
+| `api/lib/email-privacy.js` | Reusable server-side utilities: `minimiseBody`, `redactPii`, `detectInjection`, `buildLlmInput`, `validateLlmOutput`, `LLM_EXTRACTION_SCHEMA` |
+| `supabase-llm-audit.sql` | `llm_processing_log` table, RLS, security-definer insert function, retention guidance |
+| `scripts/test-email-privacy.js` | Verification script — exercises all privacy utilities against sample emails including prompt-injection text |

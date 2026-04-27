@@ -132,15 +132,53 @@ Each email in the combined inbox carries a `mailbox` key (`jgms` / `fla` / `ntrr
 
 ## Data handling, retention, and AI
 
-- This app does **not** send lead data to an LLM or AI provider.
-- Supabase is the intended primary store for lead records.
-- Browser `localStorage` should contain only per-user state such as flags, dismissals, and comments.
-- Suggested retention:
-  - declined / no action leads: 12 months
-  - actioned leads that become matter records: retain per matter-file rules, typically 7 years after closure
-  - audit logs: retain 7 years minimum
+### No raw email data to LLMs
 
-See `SECURITY.md` for the fuller hardening note, blocker list, and residual risks.
+This app does **not** currently send lead data to an LLM or AI provider.
+
+If a future integration is added, it **must** follow the privacy pipeline in `api/lib/email-privacy.js`:
+
+1. `minimiseBody()` — strip quoted replies and signatures, truncate to ≤300 chars
+2. `detectInjection()` — abort and log if prompt-injection patterns are found; **never proceed**
+3. `redactPii()` — replace phones, emails, ABNs, TFNs, and URLs with typed placeholders
+4. LLM call — subject + redacted snippet only; full bodies and attachments are prohibited
+5. `validateLlmOutput()` — enforce the JSON extraction schema; reject unexpected fields
+6. Human review — a practitioner must review before any LLM output is actioned
+7. `log_llm_processing()` — record metadata in `llm_processing_log` (no raw content)
+
+**Emails are untrusted data.** Prompt-injection text embedded in an email would be forwarded verbatim to an LLM if the pipeline above is bypassed. The `detectInjection` step is non-optional.
+
+### Inbox response privacy flags
+
+Each email returned by `/api/inbox` carries two flags:
+
+- `injection_risk: true` — the snippet matched a prompt-injection pattern. Do not pass to an LLM.
+- `redacted_pii: true` — PII was detected in the snippet (phone, email, ABN, TFN, or URL).
+
+These flags are set server-side by `api/lib/email-privacy.js` and are informational for the UI and any downstream caller.
+
+### JSON-only extraction contract
+
+Any LLM integration must return only the fields defined in `LLM_EXTRACTION_SCHEMA` (exported from `api/lib/email-privacy.js`). The schema enforces:
+
+- A closed enum for `matter_type_guess` and `urgency_guess`
+- `requires_human_review: true` (constant — LLM may not set this to false)
+- A mandatory `human_review_warning` string shown to the practitioner
+- No additional properties permitted
+
+### Storage
+
+- Supabase is the intended primary store for lead records.
+- Browser `localStorage` should contain only per-user state: flags, dismissals, and comments.
+- `llm_processing_log` records LLM call metadata only — no raw email content or extracted PII.
+
+### Retention
+
+- Declined / no-action leads: 12 months
+- Actioned leads that become matter records: retain per matter-file rules, typically 7 years after closure
+- Audit logs (`lead_audit_log`, `lead_access_log`, `llm_processing_log`): 7 years minimum (NSW LPU Rule 14)
+
+See `SECURITY.md` for the full hardening note, LLM privacy pipeline, blocker list, and residual risks.
 
 ## Notes
 

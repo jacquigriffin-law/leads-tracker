@@ -16,6 +16,7 @@
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { createHmac, timingSafeEqual } = require('crypto');
+const { minimiseBody, redactPii, detectInjection } = require('./lib/email-privacy');
 
 // ── JWT verification (HS256, no external deps) ────────────────────────────────
 // Supabase issues HS256 JWTs signed with the project's JWT secret.
@@ -70,7 +71,7 @@ async function verifySupabaseTokenRemote(token) {
 // Resets on cold start; Fluid Compute instance reuse gives meaningful protection.
 const rateLimitStore = new Map();
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 4;
+const RATE_MAX = 10;
 
 function isRateLimited(key) {
   const now = Date.now();
@@ -94,11 +95,17 @@ function extractPhone(text) {
   return m ? m[0].replace(/[\s\-]/g, ' ').trim() : '';
 }
 
-function toSnippet(text, len) {
-  return (text || '').replace(/\s+/g, ' ').trim().slice(0, len);
+// prepareEmailSnippet: minimise the body, detect prompt-injection attempts on
+// the minimised text, then redact PII before anything is returned to the UI.
+// The raw body never leaves this serverless function.
+function prepareEmailSnippet(text, len) {
+  const minimised = minimiseBody(text, len);
+  const { injection_risk } = detectInjection(minimised);
+  const { redacted, redacted_pii } = redactPii(minimised);
+  return { snippet: redacted, injection_risk, redacted_pii };
 }
 
-function toClientEmail({ id, from_name, from_email, phone, subject, received_at, snippet, source_label, source_account }) {
+function toClientEmail({ id, from_name, from_email, phone, subject, received_at, snippet, source_label, source_account, injection_risk, redacted_pii }) {
   return {
     id,
     from_name,
@@ -109,6 +116,10 @@ function toClientEmail({ id, from_name, from_email, phone, subject, received_at,
     snippet,
     source_label,
     source_account,
+    // Privacy flags: injection_risk warns callers not to pass this snippet to an LLM
+    // without further review; redacted_pii indicates PII was detected in the snippet.
+    injection_risk: injection_risk === true,
+    redacted_pii: redacted_pii === true,
   };
 }
 
@@ -142,6 +153,10 @@ async function fetchJGMS({ clientId, tenantId, clientSecret, email, label }) {
     return (data.value || []).map((msg) => {
       const from = msg.from?.emailAddress || {};
       const bodyText = msg.bodyPreview || '';
+      const { snippet, injection_risk, redacted_pii } = prepareEmailSnippet(bodyText, 160);
+      if (injection_risk) {
+        audit('inbox.injection_risk_detected', { source: label, id: `jgms-${msg.id.slice(-20)}` });
+      }
       return toClientEmail({
         id: `jgms-${msg.id.slice(-20)}`,
         from_name: from.name || from.address || 'Unknown',
@@ -149,11 +164,13 @@ async function fetchJGMS({ clientId, tenantId, clientSecret, email, label }) {
         phone: extractPhone(bodyText),
         subject: msg.subject || '(no subject)',
         received_at: msg.receivedDateTime || new Date().toISOString(),
-        snippet: toSnippet(bodyText, 160),
+        snippet,
         source_label: label,
         // source_account uses the configured label, not the raw email address,
         // to avoid leaking internal mailbox addresses to the client response.
         source_account: label,
+        injection_risk,
+        redacted_pii,
       });
     });
   } catch (err) {
@@ -188,6 +205,10 @@ async function fetchIMAP({ host, port, user, pass, label, mailboxKey }) {
               const mail = await simpleParser(source, { skipHtmlToText: false });
               const from = mail.from?.value?.[0] || {};
               const bodyText = mail.text || '';
+              const { snippet, injection_risk, redacted_pii } = prepareEmailSnippet(bodyText, 160);
+              if (injection_risk) {
+                audit('inbox.injection_risk_detected', { source: label, id: `${mailboxKey}-${uid}` });
+              }
               return toClientEmail({
                 id: `${mailboxKey}-${uid}`,
                 from_name: from.name || from.address || 'Unknown',
@@ -195,10 +216,12 @@ async function fetchIMAP({ host, port, user, pass, label, mailboxKey }) {
                 phone: extractPhone(bodyText),
                 subject: mail.subject || '(no subject)',
                 received_at: (mail.date || new Date()).toISOString(),
-                snippet: toSnippet(bodyText, 160),
+                snippet,
                 source_label: label,
                 // source_account uses the configured label, not the raw email address.
                 source_account: label,
+                injection_risk,
+                redacted_pii,
               });
             } catch {
               return null;

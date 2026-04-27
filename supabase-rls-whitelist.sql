@@ -27,8 +27,7 @@ create policy "whitelisted users can read leads"
 on public.leads for select
 using (
   auth.role() = 'authenticated'
-  and (select email from auth.users where id = auth.uid())
-    = any(array[
+  and (auth.jwt() ->> 'email') = any(array[
         'jacquigriffin@mobilesolicitor.com.au'
         -- add additional authorised email addresses here, one per line:
         -- 'assistant@mobilesolicitor.com.au',

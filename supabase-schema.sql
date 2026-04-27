@@ -85,8 +85,7 @@ create policy "whitelisted users can read leads"
 on public.leads for select
 using (
   auth.role() = 'authenticated'
-  and (select email from auth.users where id = auth.uid())
-    = any(array[
+  and (auth.jwt() ->> 'email') = any(array[
         'jacquigriffin@mobilesolicitor.com.au'
         -- add additional authorised email addresses here, one per line:
         -- 'assistant@mobilesolicitor.com.au',
@@ -172,8 +171,7 @@ drop policy if exists "practice owner can read all audit log entries" on public.
 create policy "practice owner can read all audit log entries"
 on public.lead_audit_log for select
 using (
-  (select email from auth.users where id = auth.uid())
-    = 'jacquigriffin@mobilesolicitor.com.au'
+  (auth.jwt() ->> 'email') = 'jacquigriffin@mobilesolicitor.com.au'
 );
 
 drop policy if exists "users can read own access log entries" on public.lead_access_log;
@@ -185,8 +183,7 @@ drop policy if exists "practice owner can read all access log entries" on public
 create policy "practice owner can read all access log entries"
 on public.lead_access_log for select
 using (
-  (select email from auth.users where id = auth.uid())
-    = 'jacquigriffin@mobilesolicitor.com.au'
+  (auth.jwt() ->> 'email') = 'jacquigriffin@mobilesolicitor.com.au'
 );
 
 create or replace function public.log_lead_access_event(
@@ -208,7 +205,7 @@ begin
     raise exception 'Authentication required';
   end if;
 
-  select email into v_email from auth.users where id = v_user_id;
+  v_email := coalesce(auth.jwt() ->> 'email', 'unknown');
 
   insert into public.lead_access_log (user_id, user_email, event_type, target_id, metadata)
   values (v_user_id, v_email, p_event_type, p_target_id, coalesce(p_metadata, '{}'::jsonb));
@@ -234,7 +231,7 @@ begin
   v_user_id := coalesce(new.user_id, old.user_id);
   v_lead_id := coalesce(new.lead_id, old.lead_id)::text;
 
-  select email into v_email from auth.users where id = v_user_id;
+  v_email := coalesce(auth.jwt() ->> 'email', 'unknown');
 
   if TG_OP = 'UPDATE' then
     select jsonb_object_agg(key, true)
