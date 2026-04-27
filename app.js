@@ -16,7 +16,7 @@ const DEFAULT_CONFIG = {
   }
 };
 const INBOX_POLL_MS = 45_000;
-const INBOX_API_TIMEOUT_MS = 4000;
+const INBOX_API_TIMEOUT_MS = 20000;
 
 // ── DOM element refs ─────────────────────────────────────────────────────────
 const els = {
