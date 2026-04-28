@@ -313,6 +313,30 @@ button{font:inherit}
 .draft-status-success{background:#ecfdf5;border-color:#86efac;color:#166534}
 .draft-status-warning{background:#fff7ed;border-color:#fdba74;color:#9a3412}
 
+/* ── Add Lead button ── */
+.add-lead-btn{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;border-radius:999px;background:linear-gradient(135deg,#133d7a,#2563eb);color:#fff;border:none;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(19,61,122,.22);transition:transform .16s ease,box-shadow .16s ease;font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation;margin-bottom:10px}
+.add-lead-btn:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(19,61,122,.3)}
+.add-lead-btn:active{transform:scale(.96)}
+
+/* ── Add Lead modal ── */
+.add-lead-backdrop{position:fixed;inset:0;z-index:2000;background:rgba(2,12,27,.72);display:flex;align-items:flex-end;justify-content:center;padding:0;backdrop-filter:blur(5px)}
+.add-lead-backdrop[hidden]{display:none!important}
+.add-lead-card{background:#fff;border-radius:28px 28px 0 0;padding:24px 20px 32px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;box-shadow:0 -8px 40px rgba(0,0,0,.18)}
+@media(min-width:641px){.add-lead-backdrop{align-items:center;padding:24px}.add-lead-card{border-radius:24px}}
+.add-lead-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.add-lead-title{font-size:18px;font-weight:900;color:#102f58;letter-spacing:-.02em}
+.add-lead-close{background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;padding:4px 8px;border-radius:8px;line-height:1;font-family:inherit}
+.add-lead-close:hover{background:#f3f4f6}
+.add-lead-notice{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:9px 12px;font-size:12px;font-weight:700;color:#92400e;margin-bottom:14px}
+.add-lead-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px}
+@media(max-width:480px){.add-lead-form-grid{grid-template-columns:1fr}}
+.add-lead-field{display:grid;gap:5px}.add-lead-field.span2{grid-column:1/-1}
+.add-lead-label{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#7a8ea8;padding-left:2px}
+.add-lead-form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
+
+/* ── Manual draft badge ── */
+.manual-draft-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;letter-spacing:.04em;flex-shrink:0;white-space:nowrap}
+
 /* ── Responsive ── */
 @media(max-width:640px){
   .wrap{padding:0 12px 28px}
@@ -385,6 +409,8 @@ button{font:inherit}
     <button class="tab" data-tab="actioned">Actioned</button>
     <button class="tab" data-tab="inbox">Inbox</button>
   </div>
+
+  <button class="add-lead-btn" id="addLeadBtn" type="button">&#43; Add Lead</button>
 
   <div class="search-card">
     <label class="search-card-label" for="search">Search</label>

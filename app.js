@@ -8,6 +8,7 @@ const INBOX_IMPORTED_KEY = 'xena-leads-inbox-imported';
 const INBOX_DISMISSED_KEY = 'xena-leads-inbox-dismissed';
 const INBOX_SHOW_DISMISSED_KEY = 'xena-leads-inbox-show-dismissed';
 const PENDING_HERO_FILTER_KEY = 'xena-leads-pending-hero-filter';
+const MANUAL_LEADS_KEY = 'xena-leads-manual-drafts-v1';
 const DEFAULT_CONFIG = {
   supabase: {
     enabled: true,
@@ -270,6 +271,190 @@ function migrateLegacyState() {
   });
   app.state = nextState;
   persistLocalState();
+}
+
+// ── Manual leads (device-only drafts) ────────────────────────────────────────
+function loadManualLeads() {
+  try {
+    const raw = localStorage.getItem(MANUAL_LEADS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function saveManualLeads(leads) {
+  localStorage.setItem(MANUAL_LEADS_KEY, JSON.stringify(leads));
+}
+
+function mergeManualLeadsIntoApp() {
+  app.leads = app.leads.filter((l) => !l._isManualDraft);
+  const manual = loadManualLeads().map((l) => ({ ...l, _isManualDraft: true }));
+  app.leads = [...manual, ...app.leads];
+}
+
+function removeManualLead(leadId) {
+  saveManualLeads(loadManualLeads().filter((l) => l.id !== leadId));
+}
+
+function addManualLead(formData) {
+  const id = `manual-${Date.now()}`;
+  const lead = {
+    id,
+    sender_name: String(formData.name || '').trim() || 'Unknown',
+    sender_phone: String(formData.phone || '').trim() || 'Unknown',
+    sender_email: String(formData.email || '').trim() || 'Unknown',
+    source_account: String(formData.source || 'Manual Entry'),
+    source_platform: 'Manual',
+    matter_type: String(formData.matterType || '') || 'Unknown',
+    priority: String(formData.urgency || 'MEDIUM'),
+    date_received: new Date().toISOString(),
+    location: String(formData.location || ''),
+    notes: String(formData.notes || ''),
+    next_action: String(formData.nextAction || '').trim() || 'Follow up',
+    status: 'new',
+    raw_preview: String(formData.notes || '')
+  };
+  const manual = loadManualLeads();
+  manual.unshift(lead);
+  saveManualLeads(manual);
+  return lead;
+}
+
+const ADD_LEAD_MODAL_HTML = `
+  <div id="addLeadModal" class="add-lead-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="addLeadTitle">
+    <div class="add-lead-card">
+      <div class="add-lead-header">
+        <span class="add-lead-title" id="addLeadTitle">&#43; Add Lead</span>
+        <button class="add-lead-close" data-close-add-lead aria-label="Close">&times;</button>
+      </div>
+      <div class="add-lead-notice">&#128190; Manual draft &mdash; saved on this device only, not sent anywhere</div>
+      <form id="addLeadForm" autocomplete="off">
+        <div class="add-lead-form-grid">
+          <div class="add-lead-field span2">
+            <label class="add-lead-label" for="alName">Name *</label>
+            <input id="alName" name="name" type="text" placeholder="Full name" required/>
+          </div>
+          <div class="add-lead-field">
+            <label class="add-lead-label" for="alPhone">Phone</label>
+            <input id="alPhone" name="phone" type="tel" placeholder="04xx xxx xxx"/>
+          </div>
+          <div class="add-lead-field">
+            <label class="add-lead-label" for="alEmail">Email</label>
+            <input id="alEmail" name="email" type="email" placeholder="email@example.com"/>
+          </div>
+          <div class="add-lead-field">
+            <label class="add-lead-label" for="alSource">Source</label>
+            <select id="alSource" name="source">
+              <option value="Manual Entry">Manual Entry</option>
+              <option value="Phone Call">Phone Call</option>
+              <option value="Walk-in">Walk-in</option>
+              <option value="Referral Partner">Referral Partner</option>
+              <option value="Website Intake">Website Intake</option>
+              <option value="Direct Email">Direct Email</option>
+              <option value="Google Business">Google Business</option>
+              <option value="SMS">SMS</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="add-lead-field">
+            <label class="add-lead-label" for="alUrgency">Urgency</label>
+            <select id="alUrgency" name="urgency">
+              <option value="MEDIUM" selected>Medium</option>
+              <option value="URGENT">Urgent</option>
+              <option value="LOW">Low</option>
+            </select>
+          </div>
+          <div class="add-lead-field">
+            <label class="add-lead-label" for="alMatterType">Matter Type</label>
+            <select id="alMatterType" name="matterType">
+              <option value="">Unknown</option>
+              <option value="Family Law">Family Law</option>
+              <option value="Care and Protection">Care and Protection</option>
+              <option value="Domestic Violence">Domestic Violence</option>
+              <option value="Property">Property</option>
+              <option value="Criminal">Criminal</option>
+              <option value="Estate">Estate</option>
+              <option value="Employment">Employment</option>
+              <option value="Immigration">Immigration</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="add-lead-field">
+            <label class="add-lead-label" for="alLocation">Location / Court Date</label>
+            <input id="alLocation" name="location" type="text" placeholder="e.g. Parramatta, 15 May"/>
+          </div>
+          <div class="add-lead-field span2">
+            <label class="add-lead-label" for="alNextAction">Next Action</label>
+            <input id="alNextAction" name="nextAction" type="text" placeholder="e.g. Call back, Send retainer"/>
+          </div>
+          <div class="add-lead-field span2">
+            <label class="add-lead-label" for="alNotes">Notes</label>
+            <textarea id="alNotes" name="notes" rows="3" placeholder="Key details from the enquiry&#8230;" style="resize:vertical"></textarea>
+          </div>
+        </div>
+        <div class="add-lead-form-actions">
+          <button type="button" class="btn btn-secondary" data-close-add-lead>Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Lead</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+function ensureAddLeadModal() {
+  let modal = document.getElementById('addLeadModal');
+  if (!modal) {
+    document.body.insertAdjacentHTML('beforeend', ADD_LEAD_MODAL_HTML);
+    modal = document.getElementById('addLeadModal');
+  }
+  return modal;
+}
+
+function openAddLeadModal() {
+  const modal = ensureAddLeadModal();
+  modal.querySelector('#addLeadForm')?.reset();
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => modal.querySelector('#alName')?.focus(), 60);
+}
+
+function closeAddLeadModal() {
+  const modal = document.getElementById('addLeadModal');
+  if (modal) modal.hidden = true;
+  document.body.style.overflow = '';
+}
+
+function handleAddLeadSubmit(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (!String(data.name || '').trim()) { form.querySelector('#alName')?.focus(); return; }
+  const lead = addManualLead(data);
+  mergeManualLeadsIntoApp();
+  app.currentTab = 'active';
+  app.heroFilter = 'all';
+  closeAddLeadModal();
+  updateTabUi();
+  updateHeroFilterUi();
+  render();
+  showNotice(`${lead.sender_name} saved as a manual draft — stored on this device only.`, 'info');
+}
+
+let addLeadModalBound = false;
+function attachAddLeadModal() {
+  if (addLeadModalBound) return;
+  const addLeadBtn = document.getElementById('addLeadBtn');
+  if (addLeadBtn) addLeadBtn.addEventListener('click', openAddLeadModal);
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-close-add-lead]')) { closeAddLeadModal(); return; }
+    const modal = document.getElementById('addLeadModal');
+    if (modal && event.target === modal) closeAddLeadModal();
+  });
+  document.addEventListener('keydown', (event) => {
+    const modal = document.getElementById('addLeadModal');
+    if (event.key === 'Escape' && modal && !modal.hidden) closeAddLeadModal();
+  });
+  document.addEventListener('submit', (event) => {
+    if (event.target.id === 'addLeadForm') { event.preventDefault(); handleAddLeadSubmit(event.target); }
+  });
+  addLeadModalBound = true;
 }
 
 // ── Config / Supabase ────────────────────────────────────────────────────────
@@ -882,6 +1067,7 @@ function renderLead(lead, index) {
   const diffDays = leadDate ? Math.floor((Date.now() - leadDate.getTime()) / 86400000) : -1;
   const agoClass = `time-since${diffDays >= 0 && diffDays <= 7 ? ' time-since-fresh' : diffDays > 30 ? ' time-since-old' : ''}`;
   const agoBadge = ago ? `<span class="${agoClass}">${escapeHtml(ago)}</span>` : '';
+  const manualBadge = lead._isManualDraft ? '<span class="manual-draft-badge">Manual draft &middot; device only</span>' : '';
   const rowClass = `${leadUrgencyClass(lead.priority)} ${state.actioned ? 'actioned-row' : ''}`.trim();
   const typeLabel = inferType(lead);
   const subject = lead.subject || '';
@@ -926,7 +1112,7 @@ function renderLead(lead, index) {
           </div>
           <div class="pill ${pillClass(lead.priority)} priority-pill">${escapeHtml(priorityLabel)}</div>
         </div>
-        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span></div>
+        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}</div>
       </div>
       ${sideMarkup}
     </div>
@@ -1175,6 +1361,7 @@ async function hydrate() {
   setSyncStatus('Loading…');
   loadLocalState();
   await loadLeads();
+  mergeManualLeadsIntoApp();
   await loadInbox();
   void probeAiTriage();
   syncHeroFilterFromUrl();
@@ -1208,10 +1395,16 @@ function handleDeleteLead(target) {
   const row = target.closest('.row');
   const name = row?.querySelector('.name')?.textContent?.trim() || 'this lead';
   if (!window.confirm(`Delete ${name} from this tracker view?`)) return;
-  void logSecurityEvent('lead.hide_local', String(leadId), {
-    source: row?.dataset.source || 'unknown'
-  });
-  setLeadState(leadId, { hidden: true });
+  const lead = app.leads.find((l, i) => getLeadId(l, i) === leadId);
+  if (lead?._isManualDraft) {
+    removeManualLead(leadId);
+    app.leads = app.leads.filter((l) => l.id !== leadId);
+  } else {
+    void logSecurityEvent('lead.hide_local', String(leadId), {
+      source: row?.dataset.source || 'unknown'
+    });
+    setLeadState(leadId, { hidden: true });
+  }
   render();
   showNotice(`${name} deleted from this tracker view.`, 'info');
 }
@@ -1899,6 +2092,7 @@ async function start() {
   attachEvents();
   attachCallModal();
   attachDraftModal();
+  attachAddLeadModal();
   await loadConfig();
   await initSupabase();
   await hydrate();
