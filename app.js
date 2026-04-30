@@ -1181,6 +1181,16 @@ function clearAiTriage(emailId) {
   renderInbox();
 }
 
+
+function isMissingLeadStateExtendedColumn(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return (
+    /column .* does not exist/i.test(String(error?.message || error || '')) ||
+    (message.includes('could not find') && message.includes('lead_states') && (message.includes('prospective_status') || message.includes('follow_up_date'))) ||
+    (message.includes('schema cache') && (message.includes('prospective_status') || message.includes('follow_up_date')))
+  );
+}
+
 // ── Supabase state sync ──────────────────────────────────────────────────────
 async function loadSupabaseState() {
   if (!(app.supabase && app.session)) return;
@@ -1219,12 +1229,14 @@ async function saveStateRemote(leadId) {
     follow_up_date: state.followUpDate || null,
   };
   let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
-  if (error && /column .* does not exist/i.test(error.message || '')) {
-    // Migration not yet applied — retry without the new columns
+  if (error && isMissingLeadStateExtendedColumn(error)) {
+    // Migration not yet applied — retry without the new columns.
+    // Supabase may report this as either “column does not exist” or
+    // “could not find ... in schema cache”. Either way, keep the app usable.
     delete payload.prospective_status;
     delete payload.follow_up_date;
     ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
-    console.warn('prospective_status migration not applied yet — saved without new fields');
+    console.warn('LeadFlow follow-up migration not applied yet — saved without new fields');
   }
   if (error) throw error;
   setSyncStatus('Synced');
@@ -1252,9 +1264,9 @@ async function syncAllMeaningfulStateRemote() {
       follow_up_date: state.followUpDate || null,
     };
     let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
-    if (error && /column .* does not exist/i.test(error.message || '')) {
+    if (error && isMissingLeadStateExtendedColumn(error)) {
       if (!migrationWarned) {
-        console.warn('prospective_status migration not applied yet — syncing without new fields');
+        console.warn('LeadFlow follow-up migration not applied yet — syncing without new fields');
         migrationWarned = true;
       }
       delete payload.prospective_status;
