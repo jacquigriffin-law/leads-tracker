@@ -1461,6 +1461,42 @@ function renderFollowUpInboxCard(email) {
   </div>`;
 }
 
+
+function isLeadAtRiskForPipeline(lead, state) {
+  if (getPipelineTab(lead, state) === 'closed') return false;
+  if (isLeadAtSlaRisk(lead)) return true;
+  const priorityBucket = getFollowUpPriority(lead, state)?.bucket || '';
+  return ['due', 'stale', 'ready'].includes(priorityBucket);
+}
+
+function renderHeroFilteredLeads() {
+  const visibleLeads = getVisibleLeads();
+  let title = '';
+  let leads = [];
+  if (app.heroFilter === 'urgent') {
+    title = 'Urgent work across LeadFlow';
+    leads = visibleLeads.filter((lead) => {
+      const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+      return getPipelineTab(lead, state) !== 'closed' && String(lead.priority || '').toUpperCase() === 'URGENT';
+    });
+  } else if (app.heroFilter === 'stale') {
+    title = 'At-risk work across LeadFlow';
+    leads = visibleLeads.filter((lead) => {
+      const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+      return isLeadAtRiskForPipeline(lead, state);
+    });
+  } else {
+    return false;
+  }
+  if (!leads.length) {
+    els.list.innerHTML = `<div class="pipeline-onboard"><strong>No ${escapeHtml(app.heroFilter === 'urgent' ? 'urgent' : 'at-risk')} items found</strong><p>The summary tile may include recently changed items, browser state, or items now moved into another stage. Clear the shortcut and check Follow-up, Ready to Open and Inbox.</p></div>`;
+  } else {
+    els.list.innerHTML = renderPipelineSection(title, leads, 'Nothing to show.');
+  }
+  els.emptyState.hidden = true;
+  return true;
+}
+
 function renderPipelineSection(title, leads, emptyText = 'Nothing here right now.') {
   return `<section class="pipeline-section">
     <div class="pipeline-section-header">${escapeHtml(title)} <span class="pipeline-section-count">${leads.length}</span></div>
@@ -1582,9 +1618,9 @@ function updateSummary() {
     return getPipelineTab(lead, state) !== 'closed';
   });
   const urgentCount = activeLeads.filter((lead) => String(lead.priority || '').toUpperCase() === 'URGENT').length;
-  const agingCount = activeLeads.filter((lead, index) => {
+  const agingCount = activeLeads.filter((lead) => {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
-    return isLeadAtSlaRisk(lead) || ['due', 'stale'].includes(getFollowUpPriority(lead, state)?.bucket || '');
+    return isLeadAtRiskForPipeline(lead, state);
   }).length;
   const unread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
 
@@ -1672,8 +1708,8 @@ function updateHeroFilterUi() {
   });
   if (!els.heroFilterIndicator) return;
   const contextLabels = {
-    urgent: '\u2190 Back to New Leads \u00b7 Urgent leads',
-    stale: '\u2190 Back to New Leads \u00b7 At risk',
+    urgent: '\u2190 Back to pipeline \u00b7 Urgent work',
+    stale: '\u2190 Back to pipeline \u00b7 At risk',
     new: '\u2190 Back to Inbox \u00b7 New inbox'
   };
   const contextLabel = contextLabels[app.heroFilter] || '';
@@ -1769,6 +1805,9 @@ function filterRows() {
 
 // ── Render ───────────────────────────────────────────────────────────────────
 function renderPipelineTab() {
+  if (app.heroFilter === 'urgent' || app.heroFilter === 'stale') {
+    if (renderHeroFilteredLeads()) return;
+  }
   const tab = app.currentTab;
   if (tab === 'new_leads') { renderNewLeadsTab(); return; }
   if (tab === 'followup') { renderFollowUpTab(); return; }
