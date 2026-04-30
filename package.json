@@ -5,5 +5,9 @@
   "dependencies": {
     "imapflow": "^1.0.164",
     "mailparser": "^3.7.1"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.105.1",
+    "esbuild": "^0.28.0"
   }
 }

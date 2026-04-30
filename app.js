@@ -696,7 +696,7 @@ async function initSupabase() {
     setDefaultSyncStatus();
     return;
   }
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  const { createClient } = await import('./vendor/supabase-js.js');
   app.supabase = createClient(app.config.supabase.url, app.config.supabase.anonKey, {
     auth: {
       persistSession: true,
