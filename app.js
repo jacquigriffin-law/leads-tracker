@@ -481,13 +481,24 @@ async function initSupabase() {
   }
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   app.supabase = createClient(app.config.supabase.url, app.config.supabase.anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: 'leadflow-auth'
+    }
   });
   const { data } = await app.supabase.auth.getSession();
   app.session = data.session;
   refreshAuthUi();
-  app.supabase.auth.onAuthStateChange((_event, session) => {
-    app.session = session;
+  app.supabase.auth.onAuthStateChange((event, session) => {
+    // Only clear session on explicit sign-out; INITIAL_SESSION/TOKEN_REFRESHED can
+    // fire with null during a refresh cycle and must not wipe a valid stored session.
+    if (event === 'SIGNED_OUT') {
+      app.session = null;
+    } else if (session) {
+      app.session = session;
+    }
     app.hasLoggedLeadRead = false;
     app.authPanelOpen = false;
     refreshAuthUi();
@@ -516,7 +527,10 @@ function refreshAuthUi() {
   } else {
     els.authEmail.hidden = false;
     els.sendMagicLinkBtn.hidden = false;
-    els.authStatus.textContent = 'Sign in once to sync across phone and laptop. On iPhone, open the magic link in Safari and keep using Safari for the tracker.';
+    const isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    els.authStatus.textContent = isPwa
+      ? 'Tap "Send magic link", then open the link from your email — it will open in Safari. Sign in there, then return to this app icon on your home screen.'
+      : 'Sign in once to sync across phone and laptop. On iPhone: open the magic link in the same Safari tab you use for the tracker. After signing in, you can add this page to your Home Screen to keep your session.';
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -2043,7 +2057,13 @@ function attachEvents() {
       if (error) throw error;
       setMagicLinkCooldown();
       setSyncStatus('Email sent');
-      showNotice('Magic link sent. Open it in the same browser you use for the tracker, ideally Safari on iPhone.', 'info');
+      const _isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+      showNotice(
+        _isPwa
+          ? 'Magic link sent. Open it from your email app — it will open in Safari. Sign in there, then come back to this app icon.'
+          : 'Magic link sent. Open it in the same Safari tab you use for the tracker. Your session will persist as long as you stay in Safari.',
+        'info'
+      );
     } catch (error) {
       const message = error?.message || '';
       if (/rate limit/i.test(message)) {
