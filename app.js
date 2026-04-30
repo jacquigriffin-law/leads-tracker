@@ -643,6 +643,12 @@ function ensureAddLeadModal() {
 function openAddLeadModal() {
   const modal = ensureAddLeadModal();
   modal.querySelector('#addLeadForm')?.reset();
+  const notice = modal.querySelector('.add-lead-notice');
+  if (notice) {
+    notice.textContent = (app.session && isSupabaseEnabled())
+      ? 'Saves to LeadFlow \u2014 synced across all your devices'
+      : 'Manual draft \u2014 saved on this device only, not sent anywhere';
+  }
   modal.hidden = false;
   document.body.style.overflow = 'hidden';
   setTimeout(() => modal.querySelector('#alName')?.focus(), 60);
@@ -654,9 +660,71 @@ function closeAddLeadModal() {
   document.body.style.overflow = '';
 }
 
-function handleAddLeadSubmit(form) {
+// postLeadToServer: POSTs a lead payload to /api/leads using the active Supabase
+// session token. The service role key never leaves the server. Returns the inserted
+// lead row on success; throws on auth failure, server error, or network timeout.
+async function postLeadToServer(payload) {
+  if (!app.session?.access_token) throw new Error('Not authenticated');
+  const res = await fetchWithTimeout('/api/leads', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${app.session.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  }, 12000);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error ${res.status}`);
+  }
+  const json = await res.json();
+  return json.lead;
+}
+
+async function handleAddLeadSubmit(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  if (!String(data.name || '').trim()) { form.querySelector('#alName')?.focus(); return; }
+  const name = String(data.name || '').trim();
+  if (!name) { form.querySelector('#alName')?.focus(); return; }
+
+  // When authenticated and Supabase is enabled, write directly to the database
+  // via the server-side /api/leads endpoint so the lead is immediately synced
+  // across devices. Falls back to localStorage if the server is unreachable.
+  if (app.session && isSupabaseEnabled()) {
+    const submitBtn = form.querySelector('[type=submit]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving\u2026'; }
+    try {
+      await postLeadToServer({
+        sender_name: name,
+        sender_phone: String(data.phone || '').trim() || null,
+        sender_email: String(data.email || '').trim() || null,
+        source_account: String(data.source || 'Manual Entry'),
+        source_platform: 'Manual',
+        matter_type: String(data.matterType || '') || null,
+        priority: String(data.urgency || 'MEDIUM'),
+        date_received: new Date().toISOString(),
+        location: String(data.location || '') || null,
+        notes: String(data.notes || '') || null,
+        next_action: String(data.nextAction || '').trim() || 'Follow up',
+        status: 'new',
+        raw_preview: String(data.notes || '') || null,
+      });
+      await loadLeads();
+      mergeManualLeadsIntoApp();
+      app.currentTab = 'new_leads';
+      app.heroFilter = 'all';
+      closeAddLeadModal();
+      updateTabUi();
+      updateHeroFilterUi();
+      render();
+      showNotice(`${name} saved to LeadFlow.`, 'success');
+      return;
+    } catch (err) {
+      clientAudit('leads.write_error', { error: err?.message || 'unknown', fallback: 'localStorage' });
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save Lead'; }
+      // Fall through to localStorage fallback below.
+    }
+  }
+
   const lead = addManualLead(data);
   mergeManualLeadsIntoApp();
   app.currentTab = 'new_leads';
@@ -665,7 +733,7 @@ function handleAddLeadSubmit(form) {
   updateTabUi();
   updateHeroFilterUi();
   render();
-  showNotice(`${lead.sender_name} saved as a manual draft — stored on this device only.`, 'info');
+  showNotice(`${lead.sender_name} saved as a manual draft \u2014 stored on this device only.`, 'info');
 }
 
 let addLeadModalBound = false;
@@ -1101,7 +1169,7 @@ function persistInboxLeadLocally(lead) {
   mergeManualLeadsIntoApp();
 }
 
-function importInboxEmailWithStage(emailId, stage = 'new_lead') {
+async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
   const email = app.inbox.find((e) => String(e.id) === String(emailId));
   if (!email) return;
   const sourceMeta = getSourceMeta(email.source_account || app.inboxAccount || 'Inbox');
@@ -1111,12 +1179,16 @@ function importInboxEmailWithStage(emailId, stage = 'new_lead') {
     has_phone: Boolean(email.phone),
     stage
   });
-  const lead = buildLeadFromInboxEmail(email, stage === 'follow_up' ? 'follow_up' : 'new');
-  persistInboxLeadLocally(lead);
+
+  const leadStatus = stage === 'follow_up' ? 'follow_up' : 'new';
+  const lead = buildLeadFromInboxEmail(email, leadStatus);
+
+  // Mark imported in inbox tracking regardless of write path.
   app.inboxImported.add(String(email.id));
   app.inboxDismissed.delete(String(email.id));
   persistInboxImported();
   persistInboxDismissed();
+
   const patch = {};
   if (stage === 'follow_up') patch.prospectiveStatus = 'contacted';
   if (stage === 'existing_matter') {
@@ -1124,13 +1196,39 @@ function importInboxEmailWithStage(emailId, stage = 'new_lead') {
     patch.actioned = true;
     patch.noAction = true;
   }
+
+  const label = stage === 'follow_up' ? 'Follow-up' : (stage === 'existing_matter' ? 'Closed / Existing matter' : 'New Leads');
+
+  // When authenticated, write to Supabase via the server-side endpoint so the lead
+  // is immediately available across all devices. Falls back to localStorage on error.
+  if (app.session && isSupabaseEnabled()) {
+    try {
+      const { _isManualDraft: _ignored, id: _id, ...serverPayload } = lead;
+      serverPayload.status = leadStatus === 'follow_up' ? 'follow_up' : 'new';
+      await postLeadToServer(serverPayload);
+      await loadLeads();
+      mergeManualLeadsIntoApp();
+      if (Object.keys(patch).length) setLeadState(lead.id, patch);
+      app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'follow_up' ? 'followup' : 'closed');
+      app.heroFilter = 'all';
+      updateTabUi();
+      updateHeroFilterUi();
+      render();
+      showNotice(`${email.from_name} added to ${label}.`, 'info');
+      return;
+    } catch (err) {
+      clientAudit('leads.inbox_write_error', { error: err?.message || 'unknown', fallback: 'localStorage' });
+      // Fall through to localStorage fallback below.
+    }
+  }
+
+  persistInboxLeadLocally(lead);
   if (Object.keys(patch).length) setLeadState(lead.id, patch);
   app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'follow_up' ? 'followup' : 'closed');
   app.heroFilter = 'all';
   updateTabUi();
   updateHeroFilterUi();
   render();
-  const label = stage === 'follow_up' ? 'Follow-up' : (stage === 'existing_matter' ? 'Closed / Existing matter' : 'New Leads');
   showNotice(`${email.from_name} added to ${label}.`, 'info');
 }
 
