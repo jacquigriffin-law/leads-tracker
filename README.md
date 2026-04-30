@@ -79,6 +79,17 @@ Just open the new tracker once. It auto-migrates the old `xena-leads-state-v3` k
 
 If Supabase mode is active and the user is signed in, imported state is also upserted to `lead_states`.
 
+## Lead pipeline
+
+LeadFlow uses four practitioner-friendly stages:
+
+1. **New Leads** — extracted/uncontacted enquiries from email, SMS, portals, or manual entry.
+2. **Follow-up** — contacted prospective clients who are not yet opened as matters.
+3. **Ready to Open Matter** — the handoff list for people who should now be opened in LEAP.
+4. **Closed** — no longer live opportunities, including declined/no capacity/no response/existing matter/opened in LEAP.
+
+Cards move through the pipeline with one-tap status buttons. The Inbox remains a separate review/source tab; importing an inbox item places it into **New Leads**.
+
 ## Inbox (live email)
 
 The `/api/inbox` endpoint aggregates up to three mailboxes. Set env vars in the Vercel dashboard — at least one mailbox must be configured for the Inbox tab to show live mail. All three are optional and independently enabled.

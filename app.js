@@ -27,12 +27,14 @@ const PROSPECT_STATUSES = [
   { value: 'awaiting_reply',     label: 'Awaiting reply' },
   { value: 'awaiting_documents', label: 'Awaiting documents' },
   { value: 'awaiting_legal_aid', label: 'Awaiting Legal Aid' },
-  { value: 'ready_for_leap',     label: 'Ready to open in LEAP' },
+  { value: 'ready_for_leap',     label: 'Ready to Open Matter' },
   { value: 'opened_in_leap',     label: 'Opened in LEAP' },
+  { value: 'existing_matter',    label: 'Existing matter' },
+  { value: 'not_a_lead',         label: 'Not a lead' },
   { value: 'declined',           label: 'Declined / no capacity' },
   { value: 'closed_no_response', label: 'Closed / no response' },
 ];
-const PROSPECT_TERMINAL_STATUSES = new Set(['opened_in_leap', 'declined', 'closed_no_response']);
+const PROSPECT_TERMINAL_STATUSES = new Set(['opened_in_leap', 'existing_matter', 'not_a_lead', 'declined', 'closed_no_response']);
 // Days after which a lead is considered stale for a given status
 const FOLLOWUP_STALE_DAYS = {
   new_lead:           1,
@@ -298,6 +300,8 @@ function getStatusBadgeClass(value) {
     awaiting_legal_aid: 'awaiting-legal-aid',
     ready_for_leap:     'ready-for-leap',
     opened_in_leap:     'opened-in-leap',
+    existing_matter:    'existing-matter',
+    not_a_lead:         'not-a-lead',
     declined:           'declined',
     closed_no_response: 'closed-no-response',
   };
@@ -338,7 +342,7 @@ function getFollowUpPriority(lead, state) {
   if (!state.prospectiveStatus || PROSPECT_TERMINAL_STATUSES.has(state.prospectiveStatus)) return null;
 
   if (isLeadReadyForLeap(state)) {
-    return { bucket: 'ready', label: 'Ready for LEAP review' };
+    return { bucket: 'ready', label: 'Ready to Open Matter' };
   }
 
   const followUpDate = parseDateOnly(state.followUpDate);
@@ -369,7 +373,7 @@ function renderStageActions(pipelineTab, id) {
       <span class="pipeline-actions-label">Move this lead</span>
       <div class="pipeline-btns">
         <button class="btn-pipeline btn-pipeline-primary" type="button" data-pipeline-action="contacted" data-pipeline-id="${eid}">&#10003; Contacted</button>
-        <button class="btn-pipeline btn-pipeline-neutral" type="button" data-pipeline-action="dismiss" data-pipeline-id="${eid}">&#10005; Not a lead</button>
+        <button class="btn-pipeline btn-pipeline-neutral" type="button" data-pipeline-action="not_a_lead" data-pipeline-id="${eid}">&#10005; Not a lead</button>
         <button class="btn-pipeline btn-pipeline-neutral" type="button" data-pipeline-action="existing_matter" data-pipeline-id="${eid}">Existing matter</button>
         <button class="btn-pipeline btn-pipeline-danger" type="button" data-pipeline-action="decline" data-pipeline-id="${eid}">Decline</button>
       </div>
@@ -1084,12 +1088,12 @@ function importInboxEmail(emailId) {
     opposing_party: email.opposing_party || 'Unknown'
   };
   app.leads.unshift(lead);
-  app.currentTab = 'active';
+  app.currentTab = 'new_leads';
   app.heroFilter = 'all';
   updateTabUi();
   updateHeroFilterUi();
   render();
-  showNotice(`${email.from_name} imported to Active leads.`, 'info');
+  showNotice(`${email.from_name} imported to New Leads.`, 'info');
 }
 
 function dismissInboxEmail(emailId) {
@@ -1519,7 +1523,7 @@ function renderReadyTab() {
     els.emptyState.hidden = true;
     return;
   }
-  els.list.innerHTML = renderPipelineSection('Ready to open in LEAP', readyLeads, 'Nothing marked ready yet.');
+  els.list.innerHTML = renderPipelineSection('Ready to Open Matter', readyLeads, 'Nothing marked ready yet.');
   els.emptyState.hidden = true;
 }
 
@@ -1535,10 +1539,12 @@ function renderClosedTab() {
     return;
   }
 
-  const byReason = { opened_in_leap: [], declined: [], closed_no_response: [], other: [] };
+  const byReason = { opened_in_leap: [], existing_matter: [], not_a_lead: [], declined: [], closed_no_response: [], other: [] };
   for (const lead of closedLeads) {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
     if (state.prospectiveStatus === 'opened_in_leap' || (state.actioned && state.leap)) byReason.opened_in_leap.push(lead);
+    else if (state.prospectiveStatus === 'existing_matter') byReason.existing_matter.push(lead);
+    else if (state.prospectiveStatus === 'not_a_lead') byReason.not_a_lead.push(lead);
     else if (state.prospectiveStatus === 'declined' || state.noAction) byReason.declined.push(lead);
     else if (state.prospectiveStatus === 'closed_no_response') byReason.closed_no_response.push(lead);
     else byReason.other.push(lead);
@@ -1546,7 +1552,9 @@ function renderClosedTab() {
 
   let html = '';
   if (byReason.opened_in_leap.length) html += renderPipelineSection('Opened in LEAP', byReason.opened_in_leap);
-  if (byReason.declined.length) html += renderPipelineSection('Declined / No capacity / Existing matter', byReason.declined);
+  if (byReason.existing_matter.length) html += renderPipelineSection('Existing matter — not a new lead', byReason.existing_matter);
+  if (byReason.not_a_lead.length) html += renderPipelineSection('Not a lead', byReason.not_a_lead);
+  if (byReason.declined.length) html += renderPipelineSection('Declined / No capacity', byReason.declined);
   if (byReason.closed_no_response.length) html += renderPipelineSection('Closed \u2014 no response', byReason.closed_no_response);
   if (byReason.other.length) html += renderPipelineSection('Other closed', byReason.other);
 
@@ -1557,7 +1565,10 @@ function renderClosedTab() {
 // ── Summary / hero stats ─────────────────────────────────────────────────────
 function updateSummary() {
   const visibleLeads = getVisibleLeads();
-  const activeLeads = visibleLeads.filter((lead, i) => !getLeadState(getLeadId(lead, app.leads.indexOf(lead))).actioned);
+  const activeLeads = visibleLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) !== 'closed';
+  });
   const urgentCount = activeLeads.filter((lead) => String(lead.priority || '').toUpperCase() === 'URGENT').length;
   const agingCount = activeLeads.filter((lead, index) => {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
@@ -1606,7 +1617,7 @@ function updateTabCounts() {
   const tabs = document.querySelectorAll('.tab');
   if (tabs[0]) tabs[0].innerHTML = `New Leads <span class="actioned-count">${counts.new_leads}</span>`;
   if (tabs[1]) tabs[1].innerHTML = `Follow-up <span class="actioned-count">${counts.followup + getUnmatchedFollowUpInboxItems().length}</span>`;
-  if (tabs[2]) tabs[2].innerHTML = `Ready <span class="actioned-count">${counts.ready}</span>`;
+  if (tabs[2]) tabs[2].innerHTML = `Ready to Open <span class="actioned-count">${counts.ready}</span>`;
   if (tabs[3]) tabs[3].innerHTML = `Closed <span class="actioned-count">${counts.closed}</span>`;
   if (tabs[4]) tabs[4].innerHTML = `Inbox <span class="actioned-count">${unread}</span>`;
 }
@@ -1891,12 +1902,14 @@ async function handlePipelineAction(leadId, action) {
   const patch = {};
   if (action === 'contacted') {
     patch.prospectiveStatus = 'contacted';
-  } else if (action === 'dismiss') {
-    patch.hidden = true;
+  } else if (action === 'not_a_lead') {
+    patch.noAction = true;
+    patch.actioned = true;
+    patch.prospectiveStatus = 'not_a_lead';
   } else if (action === 'existing_matter') {
     patch.noAction = true;
     patch.actioned = true;
-    patch.prospectiveStatus = 'opened_in_leap';
+    patch.prospectiveStatus = 'existing_matter';
   } else if (action === 'decline') {
     patch.prospectiveStatus = 'declined';
   } else if (action === 'awaiting_reply') {
@@ -1911,6 +1924,7 @@ async function handlePipelineAction(leadId, action) {
   } else if (action === 'opened_in_leap') {
     patch.prospectiveStatus = 'opened_in_leap';
     patch.actioned = true;
+    patch.leap = true;
   } else if (action === 'needs_more_info') {
     patch.prospectiveStatus = 'contacted';
   } else if (action === 'close') {
