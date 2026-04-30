@@ -19,6 +19,48 @@ const DEFAULT_CONFIG = {
 const INBOX_POLL_MS = 45_000;
 const INBOX_API_TIMEOUT_MS = 20000;
 
+// ── Prospective client lifecycle ─────────────────────────────────────────────
+const PROSPECT_STATUSES = [
+  { value: '',                   label: 'No status set' },
+  { value: 'new_lead',           label: 'New lead' },
+  { value: 'contacted',          label: 'Contacted' },
+  { value: 'awaiting_reply',     label: 'Awaiting reply' },
+  { value: 'awaiting_documents', label: 'Awaiting documents' },
+  { value: 'awaiting_legal_aid', label: 'Awaiting Legal Aid' },
+  { value: 'ready_for_leap',     label: 'Ready to open in LEAP' },
+  { value: 'opened_in_leap',     label: 'Opened in LEAP' },
+  { value: 'declined',           label: 'Declined / no capacity' },
+  { value: 'closed_no_response', label: 'Closed / no response' },
+];
+const PROSPECT_TERMINAL_STATUSES = new Set(['opened_in_leap', 'declined', 'closed_no_response']);
+// Days after which a lead is considered stale for a given status
+const FOLLOWUP_STALE_DAYS = {
+  new_lead:           1,
+  contacted:          2,
+  awaiting_reply:     3,
+  awaiting_documents: 7,
+  awaiting_legal_aid: 14,
+};
+const FOLLOWUP_REPLY_HINTS = [
+  'follow up',
+  'following up',
+  'just following up',
+  'checking in',
+  'any update',
+  'please advise',
+  'please see attached',
+  'attached',
+  'documents',
+  'forms',
+  'legal aid',
+  'reply',
+  'called',
+  'voicemail',
+  'can you call',
+  'thank you',
+  'thanks',
+];
+
 // ── DOM element refs ─────────────────────────────────────────────────────────
 const els = {
   heroSub: document.getElementById('heroSub'),
@@ -223,7 +265,7 @@ function getLeadId(lead, index) {
 }
 
 function getLeadState(id) {
-  return app.state[id] || { actioned: false, leap: false, noAction: false, laAccepted: false, hidden: false, comment: '' };
+  return app.state[id] || { actioned: false, leap: false, noAction: false, laAccepted: false, hidden: false, comment: '', prospectiveStatus: '', followUpDate: '' };
 }
 
 function hasMeaningfulState(state) {
@@ -233,8 +275,131 @@ function hasMeaningfulState(state) {
     state?.noAction ||
     state?.laAccepted ||
     state?.hidden ||
-    String(state?.comment || '').trim()
+    String(state?.comment || '').trim() ||
+    String(state?.prospectiveStatus || '').trim()
   );
+}
+
+function isProspectStale(lead, state) {
+  const status = state.prospectiveStatus;
+  if (!status || !FOLLOWUP_STALE_DAYS[status]) return false;
+  const leadDate = parseLeadDate(lead.date_received);
+  if (!leadDate) return false;
+  const daysSince = (Date.now() - leadDate.getTime()) / 86400000;
+  return daysSince > FOLLOWUP_STALE_DAYS[status];
+}
+
+function getStatusBadgeClass(value) {
+  const map = {
+    new_lead:           'new-lead',
+    contacted:          'contacted',
+    awaiting_reply:     'awaiting-reply',
+    awaiting_documents: 'awaiting-documents',
+    awaiting_legal_aid: 'awaiting-legal-aid',
+    ready_for_leap:     'ready-for-leap',
+    opened_in_leap:     'opened-in-leap',
+    declined:           'declined',
+    closed_no_response: 'closed-no-response',
+  };
+  return map[value] ? `status-badge status-badge-${map[value]}` : '';
+}
+
+function getProspectStatusLabel(value) {
+  return PROSPECT_STATUSES.find((status) => status.value === value)?.label || 'No status set';
+}
+
+function parseDateOnly(value) {
+  const raw = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [year, month, day] = raw.split('-').map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+function formatDateOnly(value) {
+  const date = value instanceof Date ? value : parseDateOnly(value);
+  if (!date) return '';
+  return date.toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function getDaysUntil(date) {
+  if (!date) return null;
+  return Math.floor((date.getTime() - Date.now()) / 86400000);
+}
+
+function isLeadReadyForLeap(state) {
+  return state.prospectiveStatus === 'ready_for_leap';
+}
+
+function getFollowUpPriority(lead, state) {
+  if (!state.prospectiveStatus || PROSPECT_TERMINAL_STATUSES.has(state.prospectiveStatus)) return null;
+
+  if (isLeadReadyForLeap(state)) {
+    return { bucket: 'ready', label: 'Ready for LEAP review' };
+  }
+
+  const followUpDate = parseDateOnly(state.followUpDate);
+  const daysUntil = getDaysUntil(followUpDate);
+  if (followUpDate && daysUntil !== null && daysUntil <= 0) {
+    return { bucket: 'due', label: daysUntil < 0 ? `Overdue since ${formatDateOnly(followUpDate)}` : 'Due today' };
+  }
+
+  if (isProspectStale(lead, state)) {
+    return { bucket: 'stale', label: 'Stale follow-up' };
+  }
+
+  return null;
+}
+
+function normalizePhone(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function normalizeName(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getLocalDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function inboxLooksLikeProspectiveFollowUp(email) {
+  const subject = String(email?.subject || '').toLowerCase();
+  const snippet = String(email?.snippet || '').toLowerCase();
+  const fromName = String(email?.from_name || '').toLowerCase();
+  if (!subject && !snippet) return false;
+  if (/^re\s*:|^fw\s*:|^fwd\s*:/.test(subject)) return true;
+  const haystack = `${subject}\n${snippet}\n${fromName}`;
+  return FOLLOWUP_REPLY_HINTS.some((hint) => haystack.includes(hint));
+}
+
+function inboxMatchesExistingLead(email) {
+  const fromEmail = String(email?.from_email || '').trim().toLowerCase();
+  const phone = normalizePhone(email?.phone);
+  const fromName = normalizeName(email?.from_name);
+  return app.leads.some((lead) => {
+    const leadEmail = String(lead.sender_email || '').trim().toLowerCase();
+    const leadPhone = normalizePhone(lead.sender_phone || lead.phone);
+    const leadName = normalizeName(lead.sender_name);
+    return (fromEmail && leadEmail && fromEmail === leadEmail) ||
+      (phone && leadPhone && phone === leadPhone) ||
+      (fromName && leadName && fromName === leadName);
+  });
+}
+
+function getUnmatchedFollowUpInboxItems() {
+  return app.inbox.filter((email) => (
+    !app.inboxImported.has(String(email.id)) &&
+    !app.inboxDismissed.has(String(email.id)) &&
+    inboxLooksLikeProspectiveFollowUp(email) &&
+    !inboxMatchesExistingLead(email)
+  ));
 }
 
 function getVisibleLeads() {
@@ -976,7 +1141,9 @@ async function loadSupabaseState() {
       leap: Boolean(row.leap),
       noAction: Boolean(row.no_action),
       laAccepted: Boolean(row.la_accepted),
-      comment: row.comment || ''
+      comment: row.comment || '',
+      prospectiveStatus: row.prospective_status || '',
+      followUpDate: row.follow_up_date || '',
     };
   }
   app.state = { ...app.state, ...next };
@@ -988,15 +1155,25 @@ async function saveStateRemote(leadId) {
   if (!app.remoteLeadIds.has(Number(leadId))) return;
   const state = getLeadState(leadId);
   setSyncStatus('Syncing…');
-  const { error } = await app.supabase.from('lead_states').upsert({
+  const payload = {
     lead_id: Number(leadId),
     user_id: app.session.user.id,
     actioned: state.actioned,
     leap: state.leap,
     no_action: state.noAction,
     la_accepted: state.laAccepted,
-    comment: state.comment
-  }, { onConflict: 'user_id,lead_id' });
+    comment: state.comment,
+    prospective_status: state.prospectiveStatus || null,
+    follow_up_date: state.followUpDate || null,
+  };
+  let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
+  if (error && /column .* does not exist/i.test(error.message || '')) {
+    // Migration not yet applied — retry without the new columns
+    delete payload.prospective_status;
+    delete payload.follow_up_date;
+    ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
+    console.warn('prospective_status migration not applied yet — saved without new fields');
+  }
   if (error) throw error;
   setSyncStatus('Synced');
 }
@@ -1009,16 +1186,29 @@ async function syncAllMeaningfulStateRemote() {
     return;
   }
   setSyncStatus('Syncing…');
+  let migrationWarned = false;
   for (const [leadId, state] of entries) {
-    const { error } = await app.supabase.from('lead_states').upsert({
+    const payload = {
       lead_id: Number(leadId),
       user_id: app.session.user.id,
       actioned: Boolean(state.actioned),
       leap: Boolean(state.leap),
       no_action: Boolean(state.noAction),
       la_accepted: Boolean(state.laAccepted),
-      comment: state.comment || ''
-    }, { onConflict: 'user_id,lead_id' });
+      comment: state.comment || '',
+      prospective_status: state.prospectiveStatus || null,
+      follow_up_date: state.followUpDate || null,
+    };
+    let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
+    if (error && /column .* does not exist/i.test(error.message || '')) {
+      if (!migrationWarned) {
+        console.warn('prospective_status migration not applied yet — syncing without new fields');
+        migrationWarned = true;
+      }
+      delete payload.prospective_status;
+      delete payload.follow_up_date;
+      ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
+    }
     if (error) throw error;
   }
   setSyncStatus('Synced');
@@ -1082,6 +1272,14 @@ function renderLead(lead, index) {
   const agoClass = `time-since${diffDays >= 0 && diffDays <= 7 ? ' time-since-fresh' : diffDays > 30 ? ' time-since-old' : ''}`;
   const agoBadge = ago ? `<span class="${agoClass}">${escapeHtml(ago)}</span>` : '';
   const manualBadge = lead._isManualDraft ? '<span class="manual-draft-badge">Manual draft &middot; device only</span>' : '';
+  const prospectPriority = getFollowUpPriority(lead, state);
+  const statusBadgeClass = getStatusBadgeClass(state.prospectiveStatus);
+  const statusBadge = state.prospectiveStatus
+    ? `<span class="${escapeHtml(statusBadgeClass)}">${escapeHtml(getProspectStatusLabel(state.prospectiveStatus))}</span>`
+    : '';
+  const staleBadge = prospectPriority?.bucket === 'stale'
+    ? `<span class="stale-indicator">${escapeHtml(prospectPriority.label)}</span>`
+    : '';
   const rowClass = `${leadUrgencyClass(lead.priority)} ${state.actioned ? 'actioned-row' : ''}`.trim();
   const typeLabel = inferType(lead);
   const subject = lead.subject || '';
@@ -1116,6 +1314,23 @@ function renderLead(lead, index) {
     : `<div class="lead-side lead-side-chevron"><span class="lead-chevron" aria-hidden="true">&#8250;</span></div>`;
 
   const isExpanded = app.expandedLeads.has(id);
+  const prospectSelectClass = [
+    'prospect-status-select',
+    state.prospectiveStatus === 'ready_for_leap' ? 'status-ready-leap' : '',
+    prospectPriority?.bucket === 'stale' ? 'status-stale' : '',
+  ].filter(Boolean).join(' ');
+  const followUpDateNote = state.followUpDate
+    ? `<span class="time-since">${escapeHtml(formatDateOnly(state.followUpDate))}</span>`
+    : '<span class="time-since">No due date</span>';
+  const nextActionReview = lead.next_action
+    ? `<div class="field"><strong>Review Next</strong>${escapeHtml(lead.next_action)}</div>`
+    : '';
+  const trackerStatusReview = lead.status
+    ? `<div class="field"><strong>Imported Status</strong>${escapeHtml(lead.status)}</div>`
+    : '';
+  const reviewMetaGrid = (nextActionReview || trackerStatusReview)
+    ? `<div class="grid">${nextActionReview}${trackerStatusReview}</div>`
+    : '';
 
   return `<div class="row ${rowClass}${isExpanded ? ' expanded' : ''}" data-id="${escapeHtml(id)}" data-source="${escapeHtml(sourceMeta.key)}" data-date="${escapeHtml(lead.date_received || date)}" data-urgency="${escapeHtml(priorityValue)}">
     <div class="lead-header" role="button" aria-expanded="${isExpanded}" tabindex="0">
@@ -1126,7 +1341,7 @@ function renderLead(lead, index) {
           </div>
           <div class="pill ${pillClass(lead.priority)} priority-pill">${escapeHtml(priorityLabel)}</div>
         </div>
-        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}</div>
+        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}${statusBadge}${staleBadge}</div>
       </div>
       ${sideMarkup}
     </div>
@@ -1138,21 +1353,90 @@ function renderLead(lead, index) {
         <div class="field"><strong>Opposing Party</strong>${escapeHtml(opposing)}</div>
         <div class="field"><strong>Next Action</strong>${escapeHtml(nextAction)}</div>
       </div>
+      ${reviewMetaGrid}
       <div class="grid">
         <div class="field"><strong>Email</strong>${hasEmail ? `<a class="contact-link" href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>` : '<span class="unknown">Unknown</span>'}</div>
         <div class="field"><strong>Phone</strong>${hasPhone ? `<a class="contact-link" href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>` : `<span class="unknown">${escapeHtml(phone || 'Unknown')}</span>`}</div>
       </div>
       ${actionMarkup}
       <div class="field summary-field"><strong>Summary</strong>${escapeHtml(summary)}</div>
+      <div class="prospect-status-wrap">
+        <span class="prospect-status-label">Review stage</span>
+        <select class="${escapeHtml(prospectSelectClass)}" data-prospect-status-id="${escapeHtml(id)}" aria-label="Prospective client review stage">
+          ${PROSPECT_STATUSES.map((status) => `<option value="${escapeHtml(status.value)}"${status.value === state.prospectiveStatus ? ' selected' : ''}>${escapeHtml(status.label)}</option>`).join('')}
+        </select>
+        <input type="date" value="${escapeHtml(state.followUpDate || '')}" data-followup-date-id="${escapeHtml(id)}" aria-label="Follow-up due date">
+        ${followUpDateNote}
+      </div>
       <div class="leap-row">
         <div class="leap-item actioned-item"><input type="checkbox" data-flag="actioned" data-id="${escapeHtml(id)}" ${state.actioned ? 'checked' : ''}><label>&#x2705; Actioned</label></div>
         <div class="leap-item"><input type="checkbox" data-flag="leap" data-id="${escapeHtml(id)}" ${state.leap ? 'checked' : ''}><label>LEAP Client</label></div>
         <div class="leap-item"><input type="checkbox" data-flag="noAction" data-id="${escapeHtml(id)}" ${state.noAction ? 'checked' : ''}><label>No Action</label></div>
         <div class="leap-item"><input type="checkbox" data-flag="laAccepted" data-id="${escapeHtml(id)}" ${state.laAccepted ? 'checked' : ''}><label>LA</label></div>
       </div>
-      <div class="comment-wrap"><strong>Comment</strong><textarea class="comment-box" data-comment-id="${escapeHtml(id)}" placeholder="Add a comment...">${escapeHtml(state.comment || '')}</textarea></div>
+      <div class="comment-wrap"><strong>Internal review notes</strong><textarea class="comment-box" data-comment-id="${escapeHtml(id)}" placeholder="Review first. Record call attempts, missing documents, Legal Aid notes, or why no reply was closed.">${escapeHtml(state.comment || '')}</textarea></div>
     </div>
   </div>`;
+}
+
+function renderFollowUpInboxCard(email) {
+  const date = formatDateTime(email.received_at);
+  const sourceMeta = getSourceMeta(email.source_account || 'Inbox');
+  return `<div class="fu-inbox-card" data-source="${escapeHtml(sourceMeta.key)}" data-date="${escapeHtml(email.received_at || '')}" data-urgency="">
+    <div class="fu-inbox-from">${escapeHtml(email.from_name || 'Unknown sender')}</div>
+    <div class="fu-inbox-addr">${escapeHtml(email.from_email || 'Unknown email')} &middot; ${escapeHtml(date)}</div>
+    <div class="fu-inbox-subject">${escapeHtml(email.subject || '(no subject)')}</div>
+    <div class="fu-inbox-snippet">${escapeHtml(email.snippet || '')}</div>
+    <div class="fu-inbox-actions">
+      <button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button>
+      <button class="btn-dismiss" type="button" data-dismiss-id="${escapeHtml(String(email.id))}">Dismiss</button>
+    </div>
+  </div>`;
+}
+
+function renderFollowUpSection(title, leads, modifier = '', emptyText = 'Nothing to review in this section right now.') {
+  const headerClass = modifier ? `fu-section-header ${modifier}` : 'fu-section-header';
+  return `<section class="fu-section">
+    <div class="${headerClass}">${escapeHtml(title)} <span class="fu-section-count">${leads.length}</span></div>
+    ${leads.length ? leads.map((lead) => renderLead(lead, app.leads.indexOf(lead))).join('') : `<div class="fu-empty">${escapeHtml(emptyText)}</div>`}
+  </section>`;
+}
+
+function renderFollowUp() {
+  const visibleLeads = getVisibleLeads();
+  const actionable = visibleLeads.filter((lead, index) => {
+    const state = getLeadState(getLeadId(lead, index));
+    return Boolean(getFollowUpPriority(lead, state));
+  });
+
+  if (!actionable.length && !getUnmatchedFollowUpInboxItems().length) {
+    els.list.innerHTML = `<div class="fu-onboard"><strong>Follow-up review queue is clear</strong><p>Set a review stage and optional due date on a lead to keep it in this queue. Inbox messages shown here are suggestions only and do not change the mailbox until you import them.</p></div>`;
+    els.emptyState.hidden = true;
+    return;
+  }
+
+  const readyLeads = [];
+  const dueLeads = [];
+  const staleLeads = [];
+  for (const lead of actionable) {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    const priority = getFollowUpPriority(lead, state);
+    if (priority?.bucket === 'ready') readyLeads.push(lead);
+    else if (priority?.bucket === 'due') dueLeads.push(lead);
+    else if (priority?.bucket === 'stale') staleLeads.push(lead);
+  }
+
+  const unmatchedReplies = getUnmatchedFollowUpInboxItems();
+  let html = '<div class="fu-review-notice">Review-first queue only. No email or SMS is sent automatically, and dismissing or importing a message here never mutates the original inbox item. Inbox suggestions may include email replies or SMS-forward style messages that still need practitioner review.</div>';
+  html += renderFollowUpSection('Due or overdue follow-up', dueLeads, 'needs-followup', 'No leads are due today.');
+  html += renderFollowUpSection('Stale follow-up', staleLeads, 'needs-followup', 'No stale follow-up leads.');
+  html += renderFollowUpSection('Ready to open in LEAP', readyLeads, 'leap-ready', 'Nothing marked ready for LEAP yet.');
+  html += `<section class="fu-section">
+    <div class="fu-section-header">Unmatched follow-up replies <span class="fu-section-count">${unmatchedReplies.length}</span></div>
+    ${unmatchedReplies.length ? unmatchedReplies.map(renderFollowUpInboxCard).join('') : '<div class="fu-empty">No unmatched inbox replies look like prospective-client follow-up.</div>'}
+  </section>`;
+  els.list.innerHTML = html;
+  els.emptyState.hidden = true;
 }
 
 // ── Summary / hero stats ─────────────────────────────────────────────────────
@@ -1160,7 +1444,10 @@ function updateSummary() {
   const visibleLeads = getVisibleLeads();
   const activeLeads = visibleLeads.filter((lead, i) => !getLeadState(getLeadId(lead, app.leads.indexOf(lead))).actioned);
   const urgentCount = activeLeads.filter((lead) => String(lead.priority || '').toUpperCase() === 'URGENT').length;
-  const agingCount = activeLeads.filter(isLeadAtSlaRisk).length;
+  const agingCount = activeLeads.filter((lead, index) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return isLeadAtSlaRisk(lead) || ['due', 'stale'].includes(getFollowUpPriority(lead, state)?.bucket || '');
+  }).length;
   const unread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
 
   if (els.heroStatUrgent) els.heroStatUrgent.textContent = String(urgentCount);
@@ -1197,10 +1484,15 @@ function updateTabCounts() {
   const active = visibleLeads.filter((lead) => !getLeadState(getLeadId(lead, app.leads.indexOf(lead))).actioned).length;
   const actioned = visibleLeads.length - active;
   const unread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
+  const followup = visibleLeads.filter((lead, index) => {
+    const state = getLeadState(getLeadId(lead, index));
+    return Boolean(getFollowUpPriority(lead, state));
+  }).length + getUnmatchedFollowUpInboxItems().length;
   const tabs = document.querySelectorAll('.tab');
   if (tabs[0]) tabs[0].innerHTML = `Active <span class="actioned-count">${active}</span>`;
   if (tabs[1]) tabs[1].innerHTML = `Actioned <span class="actioned-count">${actioned}</span>`;
   if (tabs[2]) tabs[2].innerHTML = `Inbox <span class="actioned-count">${unread}</span>`;
+  if (tabs[3]) tabs[3].innerHTML = `Follow-up <span class="actioned-count">${followup}</span>`;
 }
 
 function updateTabUi() {
@@ -1301,7 +1593,8 @@ function filterRows() {
   const now = new Date();
   let shown = 0;
 
-  for (const row of document.querySelectorAll('.row')) {
+  for (const row of document.querySelectorAll('.row, .fu-inbox-card')) {
+    const isLeadRow = row.classList.contains('row');
     const isActioned = row.classList.contains('actioned-row');
     const text = row.textContent.toLowerCase();
     const rowSource = row.dataset.source || 'Unknown';
@@ -1309,14 +1602,16 @@ function filterRows() {
     const rowDate = parseLeadDate(row.dataset.date || '');
     let visible = true;
 
-    if (app.currentTab === 'active' && isActioned) visible = false;
-    if (app.currentTab === 'actioned' && !isActioned) visible = false;
-    if (app.heroFilter === 'urgent' && rowUrgency !== 'URGENT') visible = false;
-    if (app.heroFilter === 'stale') {
-      if (!rowDate) visible = false;
-      else {
-        const elapsedHours = (now - rowDate) / (1000 * 60 * 60);
-        if (elapsedHours <= getSlaRiskHours(rowUrgency)) visible = false;
+    if (isLeadRow) {
+      if (app.currentTab === 'active' && isActioned) visible = false;
+      if (app.currentTab === 'actioned' && !isActioned) visible = false;
+      if (app.heroFilter === 'urgent' && rowUrgency !== 'URGENT') visible = false;
+      if (app.heroFilter === 'stale') {
+        if (!rowDate) visible = false;
+        else {
+          const elapsedHours = (now - rowDate) / (1000 * 60 * 60);
+          if (elapsedHours <= getSlaRiskHours(rowUrgency)) visible = false;
+        }
       }
     }
     if (query && !text.includes(query)) visible = false;
@@ -1343,6 +1638,16 @@ function render() {
     updateTabUi();
     updateHeroFilterUi();
     updateSummary();
+    return;
+  }
+  if (app.currentTab === 'followup') {
+    renderFollowUp();
+    updateSummary();
+    updateSourceFilter();
+    updateTabCounts();
+    updateTabUi();
+    updateHeroFilterUi();
+    filterRows();
     return;
   }
   const visibleLeads = getVisibleLeads();
@@ -1436,6 +1741,35 @@ async function handleCommentChange(target) {
       handleError(error);
     }
   }, 350);
+}
+
+async function handleProspectStatusChange(target) {
+  const leadId = target.dataset.prospectStatusId;
+  if (!leadId) return;
+  const nextStatus = String(target.value || '');
+  const patch = { prospectiveStatus: nextStatus };
+  if (nextStatus === 'ready_for_leap' && !getLeadState(leadId).followUpDate) {
+    patch.followUpDate = getLocalDateInputValue();
+  }
+  setLeadState(leadId, patch);
+  render();
+  try {
+    await saveStateRemote(leadId);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+async function handleFollowUpDateChange(target) {
+  const leadId = target.dataset.followupDateId;
+  if (!leadId) return;
+  setLeadState(leadId, { followUpDate: target.value || '' });
+  render();
+  try {
+    await saveStateRemote(leadId);
+  } catch (error) {
+    handleError(error);
+  }
 }
 
 function toggleLeadAccordion(header) {
@@ -1961,6 +2295,8 @@ function attachEvents() {
   els.list.addEventListener('change', (event) => {
     if (event.target.matches('input[type="checkbox"][data-flag]')) handleStateChange(event.target);
     if (event.target.matches('textarea[data-comment-id]')) handleCommentChange(event.target);
+    if (event.target.matches('select[data-prospect-status-id]')) void handleProspectStatusChange(event.target);
+    if (event.target.matches('input[data-followup-date-id]')) void handleFollowUpDateChange(event.target);
   });
   els.list.addEventListener('input', (event) => {
     if (event.target.matches('textarea[data-comment-id]')) handleCommentChange(event.target);

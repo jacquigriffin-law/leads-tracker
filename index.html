@@ -338,6 +338,48 @@ button{font:inherit}
 /* ── Manual draft badge ── */
 .manual-draft-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;letter-spacing:.04em;flex-shrink:0;white-space:nowrap}
 
+/* ── Prospective-status select (inside lead card) ── */
+.prospect-status-wrap{margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.prospect-status-label{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#7a8ea8;white-space:nowrap;flex-shrink:0}
+.prospect-status-select{flex:1;min-width:160px;max-width:320px;padding:8px 11px;border:1.5px solid var(--line);border-radius:12px;background:#fff;font:inherit;font-size:13px;font-weight:700;color:var(--text);cursor:pointer}
+.prospect-status-select:focus{border-color:#2d67bd;box-shadow:0 0 0 3px rgba(45,103,189,.12)}
+.prospect-status-select.status-ready-leap{border-color:#059669;background:#f0fdf4;color:#065f46}
+.prospect-status-select.status-stale{border-color:#d97706;background:#fffbeb}
+
+/* ── Status badges ── */
+.status-badge{display:inline-flex;align-items:center;font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+.status-badge-new-lead{background:#dbeafe;color:#1e40af;border-color:#93c5fd}
+.status-badge-contacted{background:#dcfce7;color:#166534;border-color:#86efac}
+.status-badge-awaiting-reply{background:#fef3c7;color:#92400e;border-color:#fbbf24}
+.status-badge-awaiting-documents{background:#fce7f3;color:#9d174d;border-color:#f9a8d4}
+.status-badge-awaiting-legal-aid{background:#ede9fe;color:#5b21b6;border-color:#c4b5fd}
+.status-badge-ready-for-leap{background:#ecfdf5;color:#065f46;border-color:#6ee7b7;font-weight:900}
+.status-badge-opened-in-leap{background:#d1fae5;color:#064e3b;border-color:#34d399}
+.status-badge-declined{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
+.status-badge-closed-no-response{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+.stale-indicator{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;margin-left:5px}
+
+/* ── Follow-up view ── */
+.fu-review-notice{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:11px 14px;font-size:13px;font-weight:600;color:#1e40af;margin-bottom:14px;line-height:1.45}
+.fu-section{margin-bottom:20px}
+.fu-section-header{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#5b7a9d;padding:7px 10px;margin-bottom:8px;border-bottom:2px solid var(--line);border-radius:0}
+.fu-section-header.leap-ready{color:#047857;border-bottom-color:#a7f3d0}
+.fu-section-header.needs-followup{color:#b45309;border-bottom-color:#fde68a}
+.fu-section-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;font-size:11px;font-weight:800;background:#edf2fa;color:var(--brand)}
+.fu-section-header.leap-ready .fu-section-count{background:#d1fae5;color:#065f46}
+.fu-section-header.needs-followup .fu-section-count{background:#fef3c7;color:#92400e}
+.fu-empty{padding:12px 10px;text-align:center;color:#7a8ea8;font-size:13px;font-style:italic;background:#fafbfc;border:1px dashed var(--line);border-radius:12px}
+.fu-onboard{padding:22px 18px;text-align:center;color:#52657d;background:#fff;border:1px dashed var(--line-strong);border-radius:18px}
+.fu-onboard strong{display:block;font-size:16px;color:#102f58;margin-bottom:8px}
+.fu-onboard p{margin:0;font-size:14px;line-height:1.5}
+.fu-inbox-card{border-radius:16px;padding:14px;border:1px solid #c7d2fe;border-left:4px solid #6366f1;background:#fafbff;margin:0}
+.fu-inbox-card:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(99,102,241,.1)}
+.fu-inbox-from{font-weight:800;font-size:14px;color:#102f58;margin-bottom:3px}
+.fu-inbox-addr{font-size:11px;color:var(--muted);margin-bottom:5px}
+.fu-inbox-subject{font-weight:700;font-size:13px;color:var(--text);margin-bottom:4px}
+.fu-inbox-snippet{font-size:12px;color:#4c5e74;margin-bottom:10px;line-height:1.4}
+.fu-inbox-actions{display:flex;gap:8px}
+
 /* ── Responsive ── */
 @media(max-width:640px){
   .wrap{padding:0 12px 28px}
@@ -409,6 +451,7 @@ button{font:inherit}
     <button class="tab active" data-tab="active">Active</button>
     <button class="tab" data-tab="actioned">Actioned</button>
     <button class="tab" data-tab="inbox">Inbox</button>
+    <button class="tab" data-tab="followup">Follow-up</button>
   </div>
 
   <button class="add-lead-btn" id="addLeadBtn" type="button">&#43; Add Lead</button>

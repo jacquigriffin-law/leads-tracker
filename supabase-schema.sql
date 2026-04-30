@@ -39,8 +39,25 @@ create table if not exists public.lead_states (
   no_action boolean not null default false,
   la_accepted boolean not null default false,
   comment text not null default '',
+  prospective_status text,
+  follow_up_date date,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  constraint lead_states_prospective_status_check
+    check (
+      prospective_status is null or
+      prospective_status in (
+        'new_lead',
+        'contacted',
+        'awaiting_reply',
+        'awaiting_documents',
+        'awaiting_legal_aid',
+        'ready_for_leap',
+        'opened_in_leap',
+        'declined',
+        'closed_no_response'
+      )
+    ),
   unique(user_id, lead_id)
 );
 
@@ -63,6 +80,10 @@ drop trigger if exists lead_states_set_updated_at on public.lead_states;
 create trigger lead_states_set_updated_at
 before update on public.lead_states
 for each row execute function public.set_updated_at();
+
+create index if not exists idx_lead_states_prospective_status
+  on public.lead_states (prospective_status)
+  where prospective_status is not null;
 
 -- ── Row-level security ────────────────────────────────────────────────────────
 
