@@ -3,7 +3,7 @@
   "short_name": "LeadFlow",
   "description": "Lead management for mobile solicitors",
   "start_url": "/",
-  "display": "standalone",
+  "display": "browser",
   "orientation": "portrait-primary",
   "theme_color": "#0a1740",
   "background_color": "#0a1740",

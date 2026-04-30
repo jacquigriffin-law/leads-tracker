@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
+<!-- Keep LeadFlow in Safari rather than iOS standalone mode. Supabase magic
+     links open in Safari, and iOS Home Screen web apps keep separate storage,
+     which makes sessions appear not to save. -->
+<meta name="apple-mobile-web-app-capable" content="no"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LeadFlow"/>
 <meta name="theme-color" content="#0a1740"/>

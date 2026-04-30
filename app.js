@@ -694,8 +694,8 @@ function refreshAuthUi() {
     els.sendMagicLinkBtn.hidden = false;
     const isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
     els.authStatus.textContent = isPwa
-      ? 'Tap "Send magic link", then open the link from your email — it will open in Safari. Sign in there, then return to this app icon on your home screen.'
-      : 'Sign in once to sync across phone and laptop. On iPhone: open the magic link in the same Safari tab you use for the tracker. After signing in, you can add this page to your Home Screen to keep your session.';
+      ? 'This Home Screen version cannot reliably save magic-link login on iPhone. Open LeadFlow in Safari, send the sign-in link there, and keep using the Safari page.'
+      : 'Sign in once to sync across phone and laptop. On iPhone, keep using LeadFlow in Safari — not the old Home Screen icon — so the saved login stays available.';
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -1655,7 +1655,7 @@ function render() {
     const authRequired = isSupabaseEnabled() && !app.session;
     if (authRequired) app.authPanelOpen = true;
     const emptyMsg = authRequired
-      ? `<div class="signin-empty"><strong>Sign in to load live leads</strong><span>LeadFlow is protected. Use your approved email, then open the magic link in Safari on this iPhone.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in to load live leads</button></div>`
+      ? `<div class="signin-empty"><strong>Sign in to load live leads</strong><span>LeadFlow is protected. On iPhone, sign in and keep using the Safari page. The old Home Screen icon cannot reliably share the saved magic-link login.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in in Safari</button></div>`
       : 'No leads available.';
     els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
     if (authRequired) refreshAuthUi();
@@ -2396,8 +2396,8 @@ function attachEvents() {
       const _isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
       showNotice(
         _isPwa
-          ? 'Magic link sent. Open it from your email app — it will open in Safari. Sign in there, then come back to this app icon.'
-          : 'Magic link sent. Open it in the same Safari tab you use for the tracker. Your session will persist as long as you stay in Safari.',
+          ? 'Magic link sent. It will open in Safari. After signing in, keep using the Safari page — the old Home Screen app has separate storage and may still look signed out.'
+          : 'Magic link sent. Open it in Safari, then keep using this Safari page. Your session should persist here.',
         'info'
       );
     } catch (error) {
