@@ -3,3 +3,6 @@ config.js
 supabase-import.sql
 data.json
 leads.json
+.env
+.env.*
+!.env.example

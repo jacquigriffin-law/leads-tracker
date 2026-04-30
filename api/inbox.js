@@ -19,6 +19,9 @@ const { createHmac, timingSafeEqual } = require('crypto');
 const { minimiseBody, redactPii, detectInjection } = require('./lib/email-privacy');
 const { isSystemEmail } = require('./lib/lead-filter');
 
+const ImapFlowRef = { current: ImapFlow };
+const simpleParserRef = { current: simpleParser };
+
 // ── JWT verification (HS256, no external deps) ────────────────────────────────
 // Supabase issues HS256 JWTs signed with the project's JWT secret.
 function verifyJwt(token, secret) {
@@ -156,6 +159,23 @@ function toClientEmail({ id, from_name, from_email, phone, subject, received_at,
   };
 }
 
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getInboxFetchConfig(now = new Date()) {
+  const lookbackDays = parsePositiveInt(process.env.INBOX_LOOKBACK_DAYS, 14);
+  const maxPerSource = parsePositiveInt(process.env.INBOX_MAX_PER_SOURCE, 120);
+  const cutoffDate = new Date(now.getTime() - (lookbackDays * 24 * 60 * 60 * 1000));
+  return {
+    lookbackDays,
+    maxPerSource,
+    cutoffDate,
+    cutoffIso: cutoffDate.toISOString(),
+  };
+}
+
 async function getGraphToken(clientId, tenantId, clientSecret) {
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
@@ -172,48 +192,59 @@ async function getGraphToken(clientId, tenantId, clientSecret) {
   return data.access_token;
 }
 
-async function fetchJGMS({ clientId, tenantId, clientSecret, email, label }) {
+async function fetchJGMS({ clientId, tenantId, clientSecret, email, label, cutoffIso, maxPerSource }) {
   try {
     const token = await getGraphToken(clientId, tenantId, clientSecret);
-    const url = new URL(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/mailFolders/inbox/messages`);
-    url.searchParams.set('$top', '15');
-    url.searchParams.set('$orderby', 'receivedDateTime desc');
+    const pageSize = Math.min(maxPerSource, 50);
+    const baseUrl = new URL(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/mailFolders/inbox/messages`);
+    baseUrl.searchParams.set('$top', String(pageSize));
+    baseUrl.searchParams.set('$orderby', 'receivedDateTime desc');
+    baseUrl.searchParams.set('$filter', `receivedDateTime ge ${cutoffIso}`);
     // bodyPreview only — avoids fetching full message bodies across the wire.
-    url.searchParams.set('$select', 'id,subject,from,receivedDateTime,bodyPreview');
-    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.value || []).map((msg) => {
-      const from = msg.from?.emailAddress || {};
-      const bodyText = msg.bodyPreview || '';
-      const { snippet, injection_risk, redacted_pii } = prepareEmailSnippet(bodyText, 160);
-      if (injection_risk) {
-        audit('inbox.injection_risk_detected', { source: label, id: `jgms-${msg.id.slice(-20)}` });
+    baseUrl.searchParams.set('$select', 'id,subject,from,receivedDateTime,bodyPreview');
+
+    const emails = [];
+    let nextUrl = baseUrl.toString();
+    while (nextUrl && emails.length < maxPerSource) {
+      const res = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return emails;
+      const data = await res.json();
+      for (const msg of (data.value || [])) {
+        if (emails.length >= maxPerSource) break;
+        const from = msg.from?.emailAddress || {};
+        const bodyText = msg.bodyPreview || '';
+        const { snippet, injection_risk, redacted_pii } = prepareEmailSnippet(bodyText, 160);
+        if (injection_risk) {
+          audit('inbox.injection_risk_detected', { source: label, id: `jgms-${msg.id.slice(-20)}` });
+        }
+        emails.push(toClientEmail({
+          id: `jgms-${msg.id.slice(-20)}`,
+          from_name: from.name || from.address || 'Unknown',
+          from_email: from.address || '',
+          phone: extractPhone(bodyText),
+          subject: msg.subject || '(no subject)',
+          received_at: msg.receivedDateTime || new Date().toISOString(),
+          snippet,
+          source_label: label,
+          // source_account uses the configured label, not the raw email address,
+          // to avoid leaking internal mailbox addresses to the client response.
+          source_account: label,
+          injection_risk,
+          redacted_pii,
+        }));
       }
-      return toClientEmail({
-        id: `jgms-${msg.id.slice(-20)}`,
-        from_name: from.name || from.address || 'Unknown',
-        from_email: from.address || '',
-        phone: extractPhone(bodyText),
-        subject: msg.subject || '(no subject)',
-        received_at: msg.receivedDateTime || new Date().toISOString(),
-        snippet,
-        source_label: label,
-        // source_account uses the configured label, not the raw email address,
-        // to avoid leaking internal mailbox addresses to the client response.
-        source_account: label,
-        injection_risk,
-        redacted_pii,
-      });
-    });
+      nextUrl = typeof data['@odata.nextLink'] === 'string' ? data['@odata.nextLink'] : '';
+    }
+
+    return emails;
   } catch (err) {
     audit('inbox.fetch_error', { source: label, error: err?.message || 'unknown' });
     return [];
   }
 }
 
-async function fetchIMAP({ host, port, user, pass, label, mailboxKey }) {
-  const client = new ImapFlow({
+async function fetchIMAP({ host, port, user, pass, label, mailboxKey, cutoffDate, maxPerSource }) {
+  const client = new ImapFlowRef.current({
     host,
     port,
     secure: true,
@@ -222,20 +253,23 @@ async function fetchIMAP({ host, port, user, pass, label, mailboxKey }) {
   });
   try {
     await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
+    if (typeof client.mailboxOpen === 'function') {
+      await client.mailboxOpen('INBOX', { readOnly: true });
+    }
+    const lock = await client.getMailboxLock('INBOX', { readOnly: true });
     let emails = [];
     try {
-      const total = client.mailbox.exists;
-      if (total > 0) {
-        const start = Math.max(1, total - 14);
+      const matched = await client.search({ since: cutoffDate });
+      const selectedUids = [...matched].sort((a, b) => a - b).slice(-maxPerSource);
+      if (selectedUids.length > 0) {
         const messages = [];
-        for await (const msg of client.fetch(`${start}:${total}`, { source: true, uid: true })) {
+        for await (const msg of client.fetch(selectedUids, { source: true, uid: true }, { uid: true })) {
           messages.push({ uid: msg.uid, source: msg.source });
         }
         const parsed = await Promise.all(
           messages.reverse().map(async ({ uid, source }) => {
             try {
-              const mail = await simpleParser(source, { skipHtmlToText: false });
+              const mail = await simpleParserRef.current(source, { skipHtmlToText: false });
               const from = mail.from?.value?.[0] || {};
               const bodyText = mail.text || '';
               const { snippet, injection_risk, redacted_pii } = prepareEmailSnippet(bodyText, 160);
@@ -333,6 +367,7 @@ module.exports = async (req, res) => {
   audit('inbox.access', { ip: clientIp, user: authedUser });
 
   // ── Mailbox credentials from Vercel environment ─────────────────────────────
+  const inboxFetchConfig = getInboxFetchConfig();
   const jgmsEmail       = process.env.JGMS_EMAIL;
   const azureClientId   = process.env.AZURE_CLIENT_ID;
   const azureTenantId   = process.env.AZURE_TENANT_ID;
@@ -355,13 +390,13 @@ module.exports = async (req, res) => {
 
   const [jgmsResult, flaResult, ntrrlsResult] = await Promise.allSettled([
     jgmsOk
-      ? fetchJGMS({ clientId: azureClientId, tenantId: azureTenantId, clientSecret: azureClientSecret, email: jgmsEmail, label: 'JGMS' })
+      ? fetchJGMS({ clientId: azureClientId, tenantId: azureTenantId, clientSecret: azureClientSecret, email: jgmsEmail, label: 'JGMS', cutoffIso: inboxFetchConfig.cutoffIso, maxPerSource: inboxFetchConfig.maxPerSource })
       : Promise.resolve([]),
     flaOk
-      ? fetchIMAP({ host: 'mail.familylawassist.net.au', port: 993, user: flaEmail, pass: flaPass, label: 'FLA', mailboxKey: 'fla' })
+      ? fetchIMAP({ host: 'mail.familylawassist.net.au', port: 993, user: flaEmail, pass: flaPass, label: 'FLA', mailboxKey: 'fla', cutoffDate: inboxFetchConfig.cutoffDate, maxPerSource: inboxFetchConfig.maxPerSource })
       : Promise.resolve([]),
     ntrrlsOk
-      ? fetchIMAP({ host: 'mail.ntruralremotelegalservices.com.au', port: 993, user: ntrrlsEmail, pass: ntrrlsPass, label: 'NTRRLS', mailboxKey: 'ntrrls' })
+      ? fetchIMAP({ host: 'mail.ntruralremotelegalservices.com.au', port: 993, user: ntrrlsEmail, pass: ntrrlsPass, label: 'NTRRLS', mailboxKey: 'ntrrls', cutoffDate: inboxFetchConfig.cutoffDate, maxPerSource: inboxFetchConfig.maxPerSource })
       : Promise.resolve([]),
   ]);
 
@@ -397,4 +432,12 @@ module.exports = async (req, res) => {
     filtered_count: allEmails.length,
     hidden_count: hiddenCount,
   });
+};
+
+module.exports._test = {
+  fetchJGMS,
+  fetchIMAP,
+  getInboxFetchConfig,
+  ImapFlowRef,
+  simpleParserRef,
 };
