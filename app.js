@@ -445,9 +445,23 @@ function inboxMatchesExistingLead(email) {
   });
 }
 
+
+function inboxEmailHasLeadRecord(email) {
+  const emailId = String(email?.id || '');
+  const fromEmail = String(email?.from_email || '').trim().toLowerCase();
+  const subject = String(email?.subject || '').trim().toLowerCase();
+  return app.leads.some((lead) => {
+    const leadId = String(lead.id || '');
+    const leadEmail = String(lead.sender_email || '').trim().toLowerCase();
+    const leadSubject = String(lead.subject || '').trim().toLowerCase();
+    return (emailId && leadId === emailId) ||
+      (fromEmail && subject && leadEmail === fromEmail && leadSubject === subject);
+  });
+}
+
 function getUnmatchedFollowUpInboxItems() {
   return app.inbox.filter((email) => (
-    !app.inboxImported.has(String(email.id)) &&
+    (!app.inboxImported.has(String(email.id)) || !inboxEmailHasLeadRecord(email)) &&
     !app.inboxDismissed.has(String(email.id)) &&
     inboxLooksLikeProspectiveFollowUp(email) &&
     !inboxMatchesExistingLead(email)
@@ -904,7 +918,7 @@ async function loadInbox() {
 
   // Detect new emails during polling (inboxPrevUnread >= 0 after first load)
   app.inboxLastChecked = new Date();
-  const newUnread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
+  const newUnread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
   const prevUnread = app.inboxPrevUnread;
   app.inboxPrevUnread = newUnread;
   if (prevUnread >= 0 && app.inboxLive && newUnread > prevUnread) {
@@ -962,8 +976,8 @@ function renderInboxEmail(email, isDismissed = false) {
       : `<button class="btn-ai-triage" type="button" data-triage-id="${emailIdEsc}">AI Triage</button>`)
     : '';
   const actionButtons = isDismissed
-    ? `<button class="btn-import" type="button" data-import-id="${emailIdEsc}">&#x2192; Import as Lead</button><button class="btn-restore" type="button" data-restore-id="${emailIdEsc}">&#x21BA; Restore</button>`
-    : `<button class="btn-import" type="button" data-import-id="${emailIdEsc}">&#x2192; Import as Lead</button><button class="btn-dismiss" type="button" data-dismiss-id="${emailIdEsc}">Dismiss</button>${aiTriageBtn}`;
+    ? `<button class="btn-import" type="button" data-import-id="${emailIdEsc}">&#x2192; Import as New Lead</button><button class="btn-restore" type="button" data-restore-id="${emailIdEsc}">&#x21BA; Restore</button>`
+    : `<button class="btn-import" type="button" data-import-id="${emailIdEsc}">&#x2192; Import as New Lead</button><button class="btn-followup" type="button" data-followup-import-id="${emailIdEsc}">Add to Follow-up</button><button class="btn-existing" type="button" data-existing-import-id="${emailIdEsc}">Existing matter</button><button class="btn-dismiss" type="button" data-dismiss-id="${emailIdEsc}">Dismiss</button>${aiTriageBtn}`;
 
   const draft = app.aiTriageDrafts[String(email.id)];
   const MATTER_LABELS = { family_law: 'Family Law', property: 'Property', criminal: 'Criminal', estate: 'Estate', employment: 'Employment', immigration: 'Immigration', other: 'Other', unclear: 'Unclear' };
@@ -1022,8 +1036,8 @@ function renderInbox() {
     els.emptyState.hidden = true;
     return;
   }
-  const pending = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id)));
-  const dismissed = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && app.inboxDismissed.has(String(e.id)));
+  const pending = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id)));
+  const dismissed = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && app.inboxDismissed.has(String(e.id)));
 
   const accounts = (app.inboxAccounts && app.inboxAccounts.length) ? app.inboxAccounts : [app.inboxAccount || 'Inbox'];
   const accountLabel = accounts.join(', ');
@@ -1034,7 +1048,7 @@ function renderInbox() {
   const hiddenNote = app.inboxHiddenCount > 0
     ? ` &mdash; <span title="System notifications, deployment alerts and auth emails are excluded automatically.">${app.inboxHiddenCount} system email${app.inboxHiddenCount !== 1 ? 's' : ''} filtered</span>`
     : '';
-  let html = staleBanner + `<div class="inbox-header">Live inbox (likely leads) &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}${hiddenNote}. <em>Import as Lead</em> adds to tracker. <em>Dismiss</em> hides here only &mdash; email stays in your mailbox.</div>`;
+  let html = staleBanner + `<div class="inbox-header">Live inbox (likely leads and follow-up replies) &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}${hiddenNote}. Use <em>Import as New Lead</em>, <em>Add to Follow-up</em>, or <em>Existing matter</em>. <em>Dismiss</em> hides here only &mdash; email stays in your mailbox.</div>`;
 
   if (pending.length) {
     html += pending.map((e) => renderInboxEmail(e, false)).join('');
@@ -1057,19 +1071,9 @@ function renderInbox() {
 }
 
 // ── Inbox actions (with security event logging) ───────────────────────────────
-function importInboxEmail(emailId) {
-  const email = app.inbox.find((e) => String(e.id) === String(emailId));
-  if (!email) return;
-  const sourceMeta = getSourceMeta(email.source_account || app.inboxAccount || 'Inbox');
-  void logSecurityEvent('inbox.import', String(email.id), {
-    source: sourceMeta.key,
-    from_domain: getEmailDomain(email.from_email),
-    has_phone: Boolean(email.phone)
-  });
-  app.inboxImported.add(String(email.id));
-  persistInboxImported();
-  const lead = {
-    id: email.id,
+function buildLeadFromInboxEmail(email, status = 'new') {
+  return {
+    id: String(email.id || `inbox-${Date.now()}`),
     sender_name: email.from_name,
     sender_email: email.from_email,
     sender_phone: email.phone || 'Unknown',
@@ -1080,20 +1084,66 @@ function importInboxEmail(emailId) {
     source_rule: `Live inbox (${email.source_account || app.inboxAccount || 'Inbox'}) - ${email.source_label || 'Email'}`,
     matter_type: email.matter_type || 'Unknown',
     priority: email.priority || 'MEDIUM',
-    status: 'new',
+    status,
     notes: '',
     raw_preview: email.snippet || '',
-    next_action: email.next_action || 'Reply to email',
+    next_action: email.next_action || (status === 'follow_up' ? 'Follow up with prospective/existing matter' : 'Reply to email'),
     location: email.location || 'Unknown',
-    opposing_party: email.opposing_party || 'Unknown'
+    opposing_party: email.opposing_party || 'Unknown',
+    _isManualDraft: true
   };
-  app.leads.unshift(lead);
-  app.currentTab = 'new_leads';
+}
+
+function persistInboxLeadLocally(lead) {
+  const manual = loadManualLeads().filter((l) => String(l.id) !== String(lead.id));
+  manual.unshift({ ...lead, _isManualDraft: undefined });
+  saveManualLeads(manual);
+  mergeManualLeadsIntoApp();
+}
+
+function importInboxEmailWithStage(emailId, stage = 'new_lead') {
+  const email = app.inbox.find((e) => String(e.id) === String(emailId));
+  if (!email) return;
+  const sourceMeta = getSourceMeta(email.source_account || app.inboxAccount || 'Inbox');
+  void logSecurityEvent('inbox.import', String(email.id), {
+    source: sourceMeta.key,
+    from_domain: getEmailDomain(email.from_email),
+    has_phone: Boolean(email.phone),
+    stage
+  });
+  const lead = buildLeadFromInboxEmail(email, stage === 'follow_up' ? 'follow_up' : 'new');
+  persistInboxLeadLocally(lead);
+  app.inboxImported.add(String(email.id));
+  app.inboxDismissed.delete(String(email.id));
+  persistInboxImported();
+  persistInboxDismissed();
+  const patch = {};
+  if (stage === 'follow_up') patch.prospectiveStatus = 'contacted';
+  if (stage === 'existing_matter') {
+    patch.prospectiveStatus = 'existing_matter';
+    patch.actioned = true;
+    patch.noAction = true;
+  }
+  if (Object.keys(patch).length) setLeadState(lead.id, patch);
+  app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'follow_up' ? 'followup' : 'closed');
   app.heroFilter = 'all';
   updateTabUi();
   updateHeroFilterUi();
   render();
-  showNotice(`${email.from_name} imported to New Leads.`, 'info');
+  const label = stage === 'follow_up' ? 'Follow-up' : (stage === 'existing_matter' ? 'Closed / Existing matter' : 'New Leads');
+  showNotice(`${email.from_name} added to ${label}.`, 'info');
+}
+
+function importInboxEmail(emailId) {
+  importInboxEmailWithStage(emailId, 'new_lead');
+}
+
+function importInboxEmailAsFollowUp(emailId) {
+  importInboxEmailWithStage(emailId, 'follow_up');
+}
+
+function importInboxEmailAsExistingMatter(emailId) {
+  importInboxEmailWithStage(emailId, 'existing_matter');
 }
 
 function dismissInboxEmail(emailId) {
@@ -1455,7 +1505,8 @@ function renderFollowUpInboxCard(email) {
     <div class="fu-inbox-subject">${escapeHtml(email.subject || '(no subject)')}</div>
     <div class="fu-inbox-snippet">${escapeHtml(email.snippet || '')}</div>
     <div class="fu-inbox-actions">
-      <button class="btn-import" type="button" data-import-id="${escapeHtml(String(email.id))}">&#x2192; Import as Lead</button>
+      <button class="btn-followup" type="button" data-followup-import-id="${escapeHtml(String(email.id))}">Add to Follow-up</button>
+      <button class="btn-existing" type="button" data-existing-import-id="${escapeHtml(String(email.id))}">Existing matter</button>
       <button class="btn-dismiss" type="button" data-dismiss-id="${escapeHtml(String(email.id))}">Dismiss</button>
     </div>
   </div>`;
@@ -1622,7 +1673,7 @@ function updateSummary() {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
     return isLeadAtRiskForPipeline(lead, state);
   }).length;
-  const unread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
+  const unread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
 
   if (els.heroStatUrgent) els.heroStatUrgent.textContent = String(urgentCount);
   if (els.heroStatAging) els.heroStatAging.textContent = String(agingCount);
@@ -1661,7 +1712,7 @@ function updateTabCounts() {
     const tab = getPipelineTab(lead, state);
     counts[tab] = (counts[tab] || 0) + 1;
   }
-  const unread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
+  const unread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
   const tabs = document.querySelectorAll('.tab');
   if (tabs[0]) tabs[0].innerHTML = `New Leads <span class="actioned-count">${counts.new_leads}</span>`;
   if (tabs[1]) tabs[1].innerHTML = `Follow-up <span class="actioned-count">${counts.followup + getUnmatchedFollowUpInboxItems().length}</span>`;
@@ -2529,6 +2580,8 @@ function attachEvents() {
     }
     if (event.target.matches('button[data-delete-id]')) { handleDeleteLead(event.target); return; }
     if (event.target.matches('button[data-import-id]')) { importInboxEmail(event.target.dataset.importId); return; }
+    if (event.target.matches('button[data-followup-import-id]')) { importInboxEmailAsFollowUp(event.target.dataset.followupImportId); return; }
+    if (event.target.matches('button[data-existing-import-id]')) { importInboxEmailAsExistingMatter(event.target.dataset.existingImportId); return; }
     if (event.target.matches('button[data-dismiss-id]')) { dismissInboxEmail(event.target.dataset.dismissId); return; }
     if (event.target.matches('button[data-restore-id]')) { undismissInboxEmail(event.target.dataset.restoreId); return; }
     if (event.target.matches('button[data-toggle-dismissed]')) { toggleInboxShowDismissed(); return; }
