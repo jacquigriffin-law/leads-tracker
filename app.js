@@ -94,7 +94,7 @@ const app = {
   config: DEFAULT_CONFIG,
   supabase: null,
   session: null,
-  currentTab: 'active',
+  currentTab: 'new_leads',
   heroFilter: 'all',
   leads: [],
   lastUpdated: '',
@@ -354,6 +354,54 @@ function getFollowUpPriority(lead, state) {
   return null;
 }
 
+function getPipelineTab(lead, state) {
+  if (state.actioned || state.noAction ||
+      PROSPECT_TERMINAL_STATUSES.has(state.prospectiveStatus)) return 'closed';
+  if (state.prospectiveStatus === 'ready_for_leap') return 'ready';
+  if (['contacted', 'awaiting_reply', 'awaiting_documents', 'awaiting_legal_aid'].includes(state.prospectiveStatus)) return 'followup';
+  return 'new_leads';
+}
+
+function renderStageActions(pipelineTab, id) {
+  const eid = escapeHtml(id);
+  if (pipelineTab === 'new_leads') {
+    return `<div class="pipeline-actions pipeline-actions-new">
+      <span class="pipeline-actions-label">Move this lead</span>
+      <div class="pipeline-btns">
+        <button class="btn-pipeline btn-pipeline-primary" type="button" data-pipeline-action="contacted" data-pipeline-id="${eid}">&#10003; Contacted</button>
+        <button class="btn-pipeline btn-pipeline-neutral" type="button" data-pipeline-action="dismiss" data-pipeline-id="${eid}">&#10005; Not a lead</button>
+        <button class="btn-pipeline btn-pipeline-neutral" type="button" data-pipeline-action="existing_matter" data-pipeline-id="${eid}">Existing matter</button>
+        <button class="btn-pipeline btn-pipeline-danger" type="button" data-pipeline-action="decline" data-pipeline-id="${eid}">Decline</button>
+      </div>
+    </div>`;
+  }
+  if (pipelineTab === 'followup') {
+    return `<div class="pipeline-actions pipeline-actions-followup">
+      <span class="pipeline-actions-label">Update status</span>
+      <div class="pipeline-btns">
+        <button class="btn-pipeline btn-pipeline-status" type="button" data-pipeline-action="awaiting_reply" data-pipeline-id="${eid}">Awaiting reply</button>
+        <button class="btn-pipeline btn-pipeline-status" type="button" data-pipeline-action="awaiting_documents" data-pipeline-id="${eid}">Awaiting docs</button>
+        <button class="btn-pipeline btn-pipeline-status" type="button" data-pipeline-action="awaiting_legal_aid" data-pipeline-id="${eid}">Awaiting Legal Aid</button>
+      </div>
+      <div class="pipeline-btns">
+        <button class="btn-pipeline btn-pipeline-primary" type="button" data-pipeline-action="ready_for_leap" data-pipeline-id="${eid}">&#10003; Ready to Open Matter</button>
+        <button class="btn-pipeline btn-pipeline-danger" type="button" data-pipeline-action="close" data-pipeline-id="${eid}">Close / No response</button>
+      </div>
+    </div>`;
+  }
+  if (pipelineTab === 'ready') {
+    return `<div class="pipeline-actions pipeline-actions-ready">
+      <span class="pipeline-actions-label">Next step</span>
+      <div class="pipeline-btns">
+        <button class="btn-pipeline btn-pipeline-primary" type="button" data-pipeline-action="opened_in_leap" data-pipeline-id="${eid}">&#10003; Opened in LEAP</button>
+        <button class="btn-pipeline btn-pipeline-warning" type="button" data-pipeline-action="needs_more_info" data-pipeline-id="${eid}">&#8592; Needs more info</button>
+        <button class="btn-pipeline btn-pipeline-danger" type="button" data-pipeline-action="close" data-pipeline-id="${eid}">Close</button>
+      </div>
+    </div>`;
+  }
+  return '';
+}
+
 function normalizePhone(value) {
   return String(value || '').replace(/\D/g, '');
 }
@@ -593,7 +641,7 @@ function handleAddLeadSubmit(form) {
   if (!String(data.name || '').trim()) { form.querySelector('#alName')?.focus(); return; }
   const lead = addManualLead(data);
   mergeManualLeadsIntoApp();
-  app.currentTab = 'active';
+  app.currentTab = 'new_leads';
   app.heroFilter = 'all';
   closeAddLeadModal();
   updateTabUi();
@@ -1313,6 +1361,8 @@ function renderLead(lead, index) {
     ? `<button class="lead-side lead-side-call quick-call-btn quick-call-pulse" type="button" data-call-phone="${escapeHtml(phone)}" data-call-name="${escapeHtml(lead.sender_name || 'Lead')}" data-call-id="${escapeHtml(id)}" aria-label="Call ${escapeHtml(lead.sender_name || 'lead')}"><span class="call-icon">&#128222;</span></button>`
     : `<div class="lead-side lead-side-chevron"><span class="lead-chevron" aria-hidden="true">&#8250;</span></div>`;
 
+  const pipelineTab = getPipelineTab(lead, state);
+  const stageActionsMarkup = renderStageActions(pipelineTab, id);
   const isExpanded = app.expandedLeads.has(id);
   const prospectSelectClass = [
     'prospect-status-select',
@@ -1359,6 +1409,7 @@ function renderLead(lead, index) {
         <div class="field"><strong>Phone</strong>${hasPhone ? `<a class="contact-link" href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>` : `<span class="unknown">${escapeHtml(phone || 'Unknown')}</span>`}</div>
       </div>
       ${actionMarkup}
+      ${stageActionsMarkup}
       <div class="field summary-field"><strong>Summary</strong>${escapeHtml(summary)}</div>
       <div class="prospect-status-wrap">
         <span class="prospect-status-label">Review stage</span>
@@ -1394,47 +1445,111 @@ function renderFollowUpInboxCard(email) {
   </div>`;
 }
 
-function renderFollowUpSection(title, leads, modifier = '', emptyText = 'Nothing to review in this section right now.') {
-  const headerClass = modifier ? `fu-section-header ${modifier}` : 'fu-section-header';
-  return `<section class="fu-section">
-    <div class="${headerClass}">${escapeHtml(title)} <span class="fu-section-count">${leads.length}</span></div>
+function renderPipelineSection(title, leads, emptyText = 'Nothing here right now.') {
+  return `<section class="pipeline-section">
+    <div class="pipeline-section-header">${escapeHtml(title)} <span class="pipeline-section-count">${leads.length}</span></div>
     ${leads.length ? leads.map((lead) => renderLead(lead, app.leads.indexOf(lead))).join('') : `<div class="fu-empty">${escapeHtml(emptyText)}</div>`}
   </section>`;
 }
 
-function renderFollowUp() {
+function renderNewLeadsTab() {
   const visibleLeads = getVisibleLeads();
-  const actionable = visibleLeads.filter((lead, index) => {
-    const state = getLeadState(getLeadId(lead, index));
-    return Boolean(getFollowUpPriority(lead, state));
+  const newLeads = visibleLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) === 'new_leads';
   });
+  if (!newLeads.length) {
+    els.list.innerHTML = `<div class="pipeline-onboard"><strong>No new leads</strong><p>New leads from email, SMS, and portal enquiries appear here. Import from Inbox or add manually. Once you contact a lead, mark them as Contacted to move to Follow-up.</p></div>`;
+    els.emptyState.hidden = true;
+    return;
+  }
+  els.list.innerHTML = newLeads.map((lead) => renderLead(lead, app.leads.indexOf(lead))).join('');
+  els.emptyState.hidden = true;
+}
 
-  if (!actionable.length && !getUnmatchedFollowUpInboxItems().length) {
-    els.list.innerHTML = `<div class="fu-onboard"><strong>Follow-up review queue is clear</strong><p>Set a review stage and optional due date on a lead to keep it in this queue. Inbox messages shown here are suggestions only and do not change the mailbox until you import them.</p></div>`;
+function renderFollowUpTab() {
+  const visibleLeads = getVisibleLeads();
+  const followupLeads = visibleLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) === 'followup';
+  });
+  const unmatchedReplies = getUnmatchedFollowUpInboxItems();
+
+  if (!followupLeads.length && !unmatchedReplies.length) {
+    els.list.innerHTML = `<div class="pipeline-onboard"><strong>Follow-up queue is clear</strong><p>Leads move here once you mark them as Contacted. Update each lead&#8217;s status (Awaiting reply, Awaiting documents, Awaiting Legal Aid) and advance them to Ready to Open Matter when the time comes.</p></div>`;
     els.emptyState.hidden = true;
     return;
   }
 
-  const readyLeads = [];
-  const dueLeads = [];
-  const staleLeads = [];
-  for (const lead of actionable) {
-    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
-    const priority = getFollowUpPriority(lead, state);
-    if (priority?.bucket === 'ready') readyLeads.push(lead);
-    else if (priority?.bucket === 'due') dueLeads.push(lead);
-    else if (priority?.bucket === 'stale') staleLeads.push(lead);
+  const byStatus = { awaiting_reply: [], awaiting_documents: [], awaiting_legal_aid: [], contacted: [] };
+  for (const lead of followupLeads) {
+    const s = getLeadState(getLeadId(lead, app.leads.indexOf(lead))).prospectiveStatus;
+    if (s === 'awaiting_reply') byStatus.awaiting_reply.push(lead);
+    else if (s === 'awaiting_documents') byStatus.awaiting_documents.push(lead);
+    else if (s === 'awaiting_legal_aid') byStatus.awaiting_legal_aid.push(lead);
+    else byStatus.contacted.push(lead);
   }
 
-  const unmatchedReplies = getUnmatchedFollowUpInboxItems();
-  let html = '<div class="fu-review-notice">Review-first queue only. No email or SMS is sent automatically, and dismissing or importing a message here never mutates the original inbox item. Inbox suggestions may include email replies or SMS-forward style messages that still need practitioner review.</div>';
-  html += renderFollowUpSection('Due or overdue follow-up', dueLeads, 'needs-followup', 'No leads are due today.');
-  html += renderFollowUpSection('Stale follow-up', staleLeads, 'needs-followup', 'No stale follow-up leads.');
-  html += renderFollowUpSection('Ready to open in LEAP', readyLeads, 'leap-ready', 'Nothing marked ready for LEAP yet.');
-  html += `<section class="fu-section">
-    <div class="fu-section-header">Unmatched follow-up replies <span class="fu-section-count">${unmatchedReplies.length}</span></div>
-    ${unmatchedReplies.length ? unmatchedReplies.map(renderFollowUpInboxCard).join('') : '<div class="fu-empty">No unmatched inbox replies look like prospective-client follow-up.</div>'}
-  </section>`;
+  let html = '';
+  if (byStatus.contacted.length) html += renderPipelineSection('Contacted \u2014 awaiting sub-status', byStatus.contacted, 'No leads here.');
+  if (byStatus.awaiting_reply.length) html += renderPipelineSection('Awaiting reply', byStatus.awaiting_reply, 'No leads here.');
+  if (byStatus.awaiting_documents.length) html += renderPipelineSection('Awaiting documents', byStatus.awaiting_documents, 'No leads here.');
+  if (byStatus.awaiting_legal_aid.length) html += renderPipelineSection('Awaiting Legal Aid', byStatus.awaiting_legal_aid, 'No leads here.');
+
+  if (unmatchedReplies.length) {
+    html += `<section class="pipeline-section">
+      <div class="pipeline-section-header">Unmatched inbox replies <span class="pipeline-section-count">${unmatchedReplies.length}</span></div>
+      <div class="fu-review-notice">These inbox messages look like follow-up replies but don&#8217;t match an existing lead. Import or dismiss each one.</div>
+      ${unmatchedReplies.map(renderFollowUpInboxCard).join('')}
+    </section>`;
+  }
+
+  els.list.innerHTML = html || `<div class="fu-empty">Nothing to show.</div>`;
+  els.emptyState.hidden = true;
+}
+
+function renderReadyTab() {
+  const visibleLeads = getVisibleLeads();
+  const readyLeads = visibleLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) === 'ready';
+  });
+  if (!readyLeads.length) {
+    els.list.innerHTML = `<div class="pipeline-onboard"><strong>Ready to Open Matter — handoff list is clear</strong><p>Leads appear here when you mark them as Ready to Open Matter. Open each matter in LEAP, then mark Opened in LEAP to close the loop.</p></div>`;
+    els.emptyState.hidden = true;
+    return;
+  }
+  els.list.innerHTML = renderPipelineSection('Ready to open in LEAP', readyLeads, 'Nothing marked ready yet.');
+  els.emptyState.hidden = true;
+}
+
+function renderClosedTab() {
+  const visibleLeads = getVisibleLeads();
+  const closedLeads = visibleLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) === 'closed';
+  });
+  if (!closedLeads.length) {
+    els.list.innerHTML = `<div class="pipeline-onboard"><strong>Nothing closed yet</strong><p>Declined leads, no-response closures, existing matters, and leads opened in LEAP are archived here.</p></div>`;
+    els.emptyState.hidden = true;
+    return;
+  }
+
+  const byReason = { opened_in_leap: [], declined: [], closed_no_response: [], other: [] };
+  for (const lead of closedLeads) {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    if (state.prospectiveStatus === 'opened_in_leap' || (state.actioned && state.leap)) byReason.opened_in_leap.push(lead);
+    else if (state.prospectiveStatus === 'declined' || state.noAction) byReason.declined.push(lead);
+    else if (state.prospectiveStatus === 'closed_no_response') byReason.closed_no_response.push(lead);
+    else byReason.other.push(lead);
+  }
+
+  let html = '';
+  if (byReason.opened_in_leap.length) html += renderPipelineSection('Opened in LEAP', byReason.opened_in_leap);
+  if (byReason.declined.length) html += renderPipelineSection('Declined / No capacity / Existing matter', byReason.declined);
+  if (byReason.closed_no_response.length) html += renderPipelineSection('Closed \u2014 no response', byReason.closed_no_response);
+  if (byReason.other.length) html += renderPipelineSection('Other closed', byReason.other);
+
   els.list.innerHTML = html;
   els.emptyState.hidden = true;
 }
@@ -1481,18 +1596,19 @@ function updateSourceFilter() {
 
 function updateTabCounts() {
   const visibleLeads = getVisibleLeads();
-  const active = visibleLeads.filter((lead) => !getLeadState(getLeadId(lead, app.leads.indexOf(lead))).actioned).length;
-  const actioned = visibleLeads.length - active;
+  const counts = { new_leads: 0, followup: 0, ready: 0, closed: 0 };
+  for (const lead of visibleLeads) {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    const tab = getPipelineTab(lead, state);
+    counts[tab] = (counts[tab] || 0) + 1;
+  }
   const unread = app.inbox.filter((e) => !app.inboxImported.has(String(e.id)) && !app.inboxDismissed.has(String(e.id))).length;
-  const followup = visibleLeads.filter((lead, index) => {
-    const state = getLeadState(getLeadId(lead, index));
-    return Boolean(getFollowUpPriority(lead, state));
-  }).length + getUnmatchedFollowUpInboxItems().length;
   const tabs = document.querySelectorAll('.tab');
-  if (tabs[0]) tabs[0].innerHTML = `Active <span class="actioned-count">${active}</span>`;
-  if (tabs[1]) tabs[1].innerHTML = `Actioned <span class="actioned-count">${actioned}</span>`;
-  if (tabs[2]) tabs[2].innerHTML = `Inbox <span class="actioned-count">${unread}</span>`;
-  if (tabs[3]) tabs[3].innerHTML = `Follow-up <span class="actioned-count">${followup}</span>`;
+  if (tabs[0]) tabs[0].innerHTML = `New Leads <span class="actioned-count">${counts.new_leads}</span>`;
+  if (tabs[1]) tabs[1].innerHTML = `Follow-up <span class="actioned-count">${counts.followup + getUnmatchedFollowUpInboxItems().length}</span>`;
+  if (tabs[2]) tabs[2].innerHTML = `Ready <span class="actioned-count">${counts.ready}</span>`;
+  if (tabs[3]) tabs[3].innerHTML = `Closed <span class="actioned-count">${counts.closed}</span>`;
+  if (tabs[4]) tabs[4].innerHTML = `Inbox <span class="actioned-count">${unread}</span>`;
 }
 
 function updateTabUi() {
@@ -1515,7 +1631,7 @@ function getHeroFilterFromUrl() {
 function syncHeroFilterFromUrl() {
   app.heroFilter = getHeroFilterFromUrl();
   if (app.heroFilter === 'new') app.currentTab = 'inbox';
-  else if (app.heroFilter === 'urgent' || app.heroFilter === 'stale') app.currentTab = 'active';
+  else if (app.heroFilter === 'urgent' || app.heroFilter === 'stale') app.currentTab = 'new_leads';
 }
 
 function clearHeroFilterUrl() {
@@ -1533,14 +1649,14 @@ function updateHeroFilterUi() {
   });
   if (!els.heroFilterIndicator) return;
   const contextLabels = {
-    urgent: '\u2190 Back to Active \u00b7 Urgent leads',
-    stale: '\u2190 Back to Active \u00b7 At risk',
+    urgent: '\u2190 Back to New Leads \u00b7 Urgent leads',
+    stale: '\u2190 Back to New Leads \u00b7 At risk',
     new: '\u2190 Back to Inbox \u00b7 New inbox'
   };
   const contextLabel = contextLabels[app.heroFilter] || '';
   els.heroFilterIndicator.hidden = !contextLabel;
   if (contextLabel) {
-    const returnTab = app.heroFilter === 'new' ? 'inbox' : 'active';
+    const returnTab = app.heroFilter === 'new' ? 'inbox' : 'new_leads';
     els.heroFilterIndicator.innerHTML = `<button class="hero-back-chip" type="button" onclick="clearHeroShortcut('${returnTab}')">${escapeHtml(contextLabel)}</button>`;
   } else {
     els.heroFilterIndicator.innerHTML = '';
@@ -1550,7 +1666,7 @@ function updateHeroFilterUi() {
 function applyHeroFilter(filter = 'all') {
   const sameFilter = app.heroFilter === filter;
   app.heroFilter = sameFilter ? 'all' : filter;
-  app.currentTab = app.heroFilter === 'new' ? 'inbox' : 'active';
+  app.currentTab = app.heroFilter === 'new' ? 'inbox' : 'new_leads';
   updateTabUi();
   updateHeroFilterUi();
   render();
@@ -1558,9 +1674,9 @@ function applyHeroFilter(filter = 'all') {
 
 window.applyHeroFilter = applyHeroFilter;
 
-function clearHeroShortcut(returnTab = 'active') {
+function clearHeroShortcut(returnTab = 'new_leads') {
   app.heroFilter = 'all';
-  app.currentTab = returnTab === 'inbox' ? 'inbox' : 'active';
+  app.currentTab = returnTab === 'inbox' ? 'inbox' : 'new_leads';
   clearHeroFilterUrl();
   updateTabUi();
   updateHeroFilterUi();
@@ -1603,8 +1719,6 @@ function filterRows() {
     let visible = true;
 
     if (isLeadRow) {
-      if (app.currentTab === 'active' && isActioned) visible = false;
-      if (app.currentTab === 'actioned' && !isActioned) visible = false;
       if (app.heroFilter === 'urgent' && rowUrgency !== 'URGENT') visible = false;
       if (app.heroFilter === 'stale') {
         if (!rowDate) visible = false;
@@ -1631,6 +1745,14 @@ function filterRows() {
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
+function renderPipelineTab() {
+  const tab = app.currentTab;
+  if (tab === 'new_leads') { renderNewLeadsTab(); return; }
+  if (tab === 'followup') { renderFollowUpTab(); return; }
+  if (tab === 'ready') { renderReadyTab(); return; }
+  if (tab === 'closed') { renderClosedTab(); return; }
+}
+
 function render() {
   if (app.currentTab === 'inbox') {
     renderInbox();
@@ -1640,8 +1762,24 @@ function render() {
     updateSummary();
     return;
   }
-  if (app.currentTab === 'followup') {
-    renderFollowUp();
+  const isPipelineTab = ['new_leads', 'followup', 'ready', 'closed'].includes(app.currentTab);
+  if (isPipelineTab) {
+    const visibleLeads = getVisibleLeads();
+    if (!visibleLeads.length && !app.inbox.length) {
+      const authRequired = isSupabaseEnabled() && !app.session;
+      if (authRequired) app.authPanelOpen = true;
+      const emptyMsg = authRequired
+        ? `<div class="signin-empty"><strong>Sign in to load live leads</strong><span>LeadFlow is protected. On iPhone, sign in and keep using the Safari page. The old Home Screen icon cannot reliably share the saved magic-link login.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in in Safari</button></div>`
+        : 'No leads available.';
+      els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
+      if (authRequired) refreshAuthUi();
+      updateSummary();
+      updateTabCounts();
+      updateTabUi();
+      updateHeroFilterUi();
+      return;
+    }
+    renderPipelineTab();
     updateSummary();
     updateSourceFilter();
     updateTabCounts();
@@ -1650,29 +1788,6 @@ function render() {
     filterRows();
     return;
   }
-  const visibleLeads = getVisibleLeads();
-  if (!visibleLeads.length) {
-    const authRequired = isSupabaseEnabled() && !app.session;
-    if (authRequired) app.authPanelOpen = true;
-    const emptyMsg = authRequired
-      ? `<div class="signin-empty"><strong>Sign in to load live leads</strong><span>LeadFlow is protected. On iPhone, sign in and keep using the Safari page. The old Home Screen icon cannot reliably share the saved magic-link login.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in in Safari</button></div>`
-      : 'No leads available.';
-    els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
-    if (authRequired) refreshAuthUi();
-    updateSummary();
-    updateTabCounts();
-    updateTabUi();
-    updateHeroFilterUi();
-    filterRows();
-    return;
-  }
-  els.list.innerHTML = visibleLeads.map((lead) => renderLead(lead, app.leads.indexOf(lead))).join('');
-  updateSummary();
-  updateSourceFilter();
-  updateTabCounts();
-  updateTabUi();
-  updateHeroFilterUi();
-  filterRows();
 }
 
 // ── Hydrate ──────────────────────────────────────────────────────────────────
@@ -1764,6 +1879,46 @@ async function handleFollowUpDateChange(target) {
   const leadId = target.dataset.followupDateId;
   if (!leadId) return;
   setLeadState(leadId, { followUpDate: target.value || '' });
+  render();
+  try {
+    await saveStateRemote(leadId);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+async function handlePipelineAction(leadId, action) {
+  const patch = {};
+  if (action === 'contacted') {
+    patch.prospectiveStatus = 'contacted';
+  } else if (action === 'dismiss') {
+    patch.hidden = true;
+  } else if (action === 'existing_matter') {
+    patch.noAction = true;
+    patch.actioned = true;
+    patch.prospectiveStatus = 'opened_in_leap';
+  } else if (action === 'decline') {
+    patch.prospectiveStatus = 'declined';
+  } else if (action === 'awaiting_reply') {
+    patch.prospectiveStatus = 'awaiting_reply';
+  } else if (action === 'awaiting_documents') {
+    patch.prospectiveStatus = 'awaiting_documents';
+  } else if (action === 'awaiting_legal_aid') {
+    patch.prospectiveStatus = 'awaiting_legal_aid';
+  } else if (action === 'ready_for_leap') {
+    patch.prospectiveStatus = 'ready_for_leap';
+    if (!getLeadState(leadId).followUpDate) patch.followUpDate = getLocalDateInputValue();
+  } else if (action === 'opened_in_leap') {
+    patch.prospectiveStatus = 'opened_in_leap';
+    patch.actioned = true;
+  } else if (action === 'needs_more_info') {
+    patch.prospectiveStatus = 'contacted';
+  } else if (action === 'close') {
+    patch.prospectiveStatus = 'closed_no_response';
+  } else {
+    return;
+  }
+  setLeadState(leadId, patch);
   render();
   try {
     await saveStateRemote(leadId);
@@ -2302,6 +2457,11 @@ function attachEvents() {
     if (event.target.matches('textarea[data-comment-id]')) handleCommentChange(event.target);
   });
   els.list.addEventListener('click', (event) => {
+    const pipelineBtn = event.target.closest('button[data-pipeline-action]');
+    if (pipelineBtn) {
+      void handlePipelineAction(pipelineBtn.dataset.pipelineId, pipelineBtn.dataset.pipelineAction);
+      return;
+    }
     if (event.target.matches('button[data-delete-id]')) { handleDeleteLead(event.target); return; }
     if (event.target.matches('button[data-import-id]')) { importInboxEmail(event.target.dataset.importId); return; }
     if (event.target.matches('button[data-dismiss-id]')) { dismissInboxEmail(event.target.dataset.dismissId); return; }

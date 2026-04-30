@@ -383,6 +383,37 @@ button{font:inherit}
 .fu-inbox-snippet{font-size:12px;color:#4c5e74;margin-bottom:10px;line-height:1.4}
 .fu-inbox-actions{display:flex;gap:8px}
 
+/* ── Pipeline action buttons ── */
+.pipeline-actions{margin:12px 0;padding:11px 12px;border-radius:14px;border:1px solid var(--line)}
+.pipeline-actions-label{display:block;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#7a8ea8;margin-bottom:8px}
+.pipeline-btns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.pipeline-btns:last-child{margin-bottom:0}
+.btn-pipeline{display:inline-flex;align-items:center;justify-content:center;padding:9px 13px;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;border:1px solid transparent;font-family:inherit;transition:transform .14s ease,box-shadow .14s ease;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation;line-height:1}
+.btn-pipeline:hover{transform:translateY(-1px)}
+.btn-pipeline:active{transform:scale(.96)}
+.btn-pipeline-primary{background:linear-gradient(135deg,#047857,#059669);color:#fff;border-color:#047857;box-shadow:0 4px 12px rgba(5,150,105,.22)}
+.btn-pipeline-primary:hover{box-shadow:0 6px 16px rgba(5,150,105,.32)}
+.btn-pipeline-neutral{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+.btn-pipeline-neutral:hover{background:#e2e8f0}
+.btn-pipeline-warning{background:#fff7ed;color:#9a3412;border-color:#fdba74}
+.btn-pipeline-warning:hover{background:#ffedd5}
+.btn-pipeline-danger{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
+.btn-pipeline-danger:hover{background:#fecaca}
+.btn-pipeline-status{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;font-size:12px;padding:7px 11px}
+.btn-pipeline-status:hover{background:#dbeafe}
+.pipeline-actions-new{background:#f0fdf4;border-color:#a7f3d0}
+.pipeline-actions-followup{background:#fffbeb;border-color:#fde68a}
+.pipeline-actions-ready{background:#eff6ff;border-color:#bfdbfe}
+.pipeline-actions-closed{background:#f8fafc;border-color:#e2e8f0}
+
+/* ── Pipeline tab section headers ── */
+.pipeline-section{margin-bottom:18px}
+.pipeline-section-header{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#5b7a9d;padding:6px 10px;margin-bottom:8px;border-bottom:2px solid var(--line);border-radius:0}
+.pipeline-section-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;font-size:11px;font-weight:800;background:#edf2fa;color:var(--brand)}
+.pipeline-onboard{padding:22px 18px;text-align:center;color:#52657d;background:#fff;border:1px dashed var(--line-strong);border-radius:18px}
+.pipeline-onboard strong{display:block;font-size:16px;color:#102f58;margin-bottom:8px}
+.pipeline-onboard p{margin:0;font-size:14px;line-height:1.5}
+
 /* ── Responsive ── */
 @media(max-width:640px){
   .wrap{padding:0 12px 28px}
@@ -451,10 +482,11 @@ button{font:inherit}
   <div class="hero-filter-indicator" id="heroFilterIndicator" hidden></div>
 
   <div class="tabs">
-    <button class="tab active" data-tab="active">Active</button>
-    <button class="tab" data-tab="actioned">Actioned</button>
-    <button class="tab" data-tab="inbox">Inbox</button>
+    <button class="tab active" data-tab="new_leads">New Leads</button>
     <button class="tab" data-tab="followup">Follow-up</button>
+    <button class="tab" data-tab="ready">Ready</button>
+    <button class="tab" data-tab="closed">Closed</button>
+    <button class="tab" data-tab="inbox">Inbox</button>
   </div>
 
   <button class="add-lead-btn" id="addLeadBtn" type="button">&#43; Add Lead</button>
