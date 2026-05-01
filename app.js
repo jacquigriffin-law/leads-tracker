@@ -1209,7 +1209,7 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
       await loadLeads();
       mergeManualLeadsIntoApp();
       if (Object.keys(patch).length) setLeadState(lead.id, patch);
-      app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'follow_up' ? 'followup' : 'closed');
+      if (stage !== 'existing_matter') app.currentTab = stage === 'new_lead' ? 'new_leads' : 'followup';
       app.heroFilter = 'all';
       updateTabUi();
       updateHeroFilterUi();
@@ -1224,7 +1224,7 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
 
   persistInboxLeadLocally(lead);
   if (Object.keys(patch).length) setLeadState(lead.id, patch);
-  app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'follow_up' ? 'followup' : 'closed');
+  if (stage !== 'existing_matter') app.currentTab = stage === 'new_lead' ? 'new_leads' : 'followup';
   app.heroFilter = 'all';
   updateTabUi();
   updateHeroFilterUi();
