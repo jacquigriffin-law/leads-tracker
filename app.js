@@ -35,6 +35,16 @@ const PROSPECT_STATUSES = [
   { value: 'closed_no_response', label: 'Closed / no response' },
 ];
 const PROSPECT_TERMINAL_STATUSES = new Set(['opened_in_leap', 'existing_matter', 'not_a_lead', 'declined', 'closed_no_response']);
+
+// ── Conflict check lifecycle ─────────────────────────────────────────────────
+const CONFLICT_STATUSES = [
+  { value: '',                   label: 'Not checked' },
+  { value: 'requested',          label: 'Requested' },
+  { value: 'clear',              label: 'Clear' },
+  { value: 'needs_review',       label: 'Needs review' },
+  { value: 'possible_conflict',  label: 'Possible conflict' },
+  { value: 'blocked',            label: 'Blocked' },
+];
 // Days after which a lead is considered stale for a given status
 const FOLLOWUP_STALE_DAYS = {
   new_lead:           1,
@@ -267,7 +277,7 @@ function getLeadId(lead, index) {
 }
 
 function getLeadState(id) {
-  return app.state[id] || { actioned: false, leap: false, noAction: false, laAccepted: false, hidden: false, comment: '', prospectiveStatus: '', followUpDate: '' };
+  return app.state[id] || { actioned: false, leap: false, noAction: false, laAccepted: false, hidden: false, comment: '', prospectiveStatus: '', followUpDate: '', conflictStatus: '', conflictNotes: '' };
 }
 
 function hasMeaningfulState(state) {
@@ -278,7 +288,8 @@ function hasMeaningfulState(state) {
     state?.laAccepted ||
     state?.hidden ||
     String(state?.comment || '').trim() ||
-    String(state?.prospectiveStatus || '').trim()
+    String(state?.prospectiveStatus || '').trim() ||
+    String(state?.conflictStatus || '').trim()
   );
 }
 
@@ -310,6 +321,20 @@ function getStatusBadgeClass(value) {
 
 function getProspectStatusLabel(value) {
   return PROSPECT_STATUSES.find((status) => status.value === value)?.label || 'No status set';
+}
+
+function getConflictStatusLabel(value) {
+  return CONFLICT_STATUSES.find((s) => s.value === value)?.label || '';
+}
+
+function getConflictBadgeClass(value) {
+  const map = { requested: 'requested', clear: 'clear', needs_review: 'needs-review', possible_conflict: 'possible', blocked: 'blocked' };
+  return map[value] ? `conflict-badge conflict-badge-${map[value]}` : '';
+}
+
+function getConflictSelectClass(value) {
+  const map = { clear: 'conflict-clear', possible_conflict: 'conflict-possible', needs_review: 'conflict-needs-review', blocked: 'conflict-blocked' };
+  return ['conflict-status-select', map[value] || ''].filter(Boolean).join(' ');
 }
 
 function parseDateOnly(value) {
@@ -1332,10 +1357,12 @@ function clearAiTriage(emailId) {
 
 function isMissingLeadStateExtendedColumn(error) {
   const message = String(error?.message || error || '').toLowerCase();
+  const extendedCols = ['prospective_status', 'follow_up_date', 'conflict_status', 'conflict_notes'];
+  const hasExtendedCol = extendedCols.some((c) => message.includes(c));
   return (
     /column .* does not exist/i.test(String(error?.message || error || '')) ||
-    (message.includes('could not find') && message.includes('lead_states') && (message.includes('prospective_status') || message.includes('follow_up_date'))) ||
-    (message.includes('schema cache') && (message.includes('prospective_status') || message.includes('follow_up_date')))
+    (message.includes('could not find') && message.includes('lead_states') && hasExtendedCol) ||
+    (message.includes('schema cache') && hasExtendedCol)
   );
 }
 
@@ -1354,6 +1381,8 @@ async function loadSupabaseState() {
       comment: row.comment || '',
       prospectiveStatus: row.prospective_status || '',
       followUpDate: row.follow_up_date || '',
+      conflictStatus: row.conflict_status || '',
+      conflictNotes: row.conflict_notes || '',
     };
   }
   app.state = { ...app.state, ...next };
@@ -1375,16 +1404,18 @@ async function saveStateRemote(leadId) {
     comment: state.comment,
     prospective_status: state.prospectiveStatus || null,
     follow_up_date: state.followUpDate || null,
+    conflict_status: state.conflictStatus || null,
+    conflict_notes: state.conflictNotes || null,
   };
   let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
   if (error && isMissingLeadStateExtendedColumn(error)) {
-    // Migration not yet applied — retry without the new columns.
-    // Supabase may report this as either “column does not exist” or
-    // “could not find ... in schema cache”. Either way, keep the app usable.
+    // Migration not yet applied — retry without the extended columns.
     delete payload.prospective_status;
     delete payload.follow_up_date;
+    delete payload.conflict_status;
+    delete payload.conflict_notes;
     ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
-    console.warn('LeadFlow follow-up migration not applied yet — saved without new fields');
+    console.warn('LeadFlow extended migration not applied yet — saved without new fields');
   }
   if (error) throw error;
   setSyncStatus('Synced');
@@ -1410,15 +1441,19 @@ async function syncAllMeaningfulStateRemote() {
       comment: state.comment || '',
       prospective_status: state.prospectiveStatus || null,
       follow_up_date: state.followUpDate || null,
+      conflict_status: state.conflictStatus || null,
+      conflict_notes: state.conflictNotes || null,
     };
     let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
     if (error && isMissingLeadStateExtendedColumn(error)) {
       if (!migrationWarned) {
-        console.warn('LeadFlow follow-up migration not applied yet — syncing without new fields');
+        console.warn('LeadFlow extended migration not applied yet — syncing without new fields');
         migrationWarned = true;
       }
       delete payload.prospective_status;
       delete payload.follow_up_date;
+      delete payload.conflict_status;
+      delete payload.conflict_notes;
       ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
     }
     if (error) throw error;
@@ -1492,6 +1527,10 @@ function renderLead(lead, index) {
   const staleBadge = prospectPriority?.bucket === 'stale'
     ? `<span class="stale-indicator">${escapeHtml(prospectPriority.label)}</span>`
     : '';
+  const conflictBadgeClass = getConflictBadgeClass(state.conflictStatus);
+  const conflictBadge = state.conflictStatus
+    ? `<span class="${escapeHtml(conflictBadgeClass)}">&#9998; ${escapeHtml(getConflictStatusLabel(state.conflictStatus))}</span>`
+    : '';
   const rowClass = `${leadUrgencyClass(lead.priority)} ${state.actioned ? 'actioned-row' : ''}`.trim();
   const typeLabel = inferType(lead);
   const subject = lead.subject || '';
@@ -1555,7 +1594,7 @@ function renderLead(lead, index) {
           </div>
           <div class="pill ${pillClass(lead.priority)} priority-pill">${escapeHtml(priorityLabel)}</div>
         </div>
-        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}${statusBadge}${staleBadge}</div>
+        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}${statusBadge}${staleBadge}${conflictBadge}</div>
       </div>
       ${sideMarkup}
     </div>
@@ -1582,6 +1621,18 @@ function renderLead(lead, index) {
         </select>
         <input type="date" value="${escapeHtml(state.followUpDate || '')}" data-followup-date-id="${escapeHtml(id)}" aria-label="Follow-up due date">
         ${followUpDateNote}
+      </div>
+      <div class="conflict-check-wrap">
+        <div class="conflict-check-header">
+          <span class="conflict-check-label">Conflict Check</span>
+          <button class="btn-xena-conflict" type="button" data-xena-conflict-id="${escapeHtml(id)}">&#128203; Ask Xena conflict check</button>
+        </div>
+        <select class="${escapeHtml(getConflictSelectClass(state.conflictStatus))}" data-conflict-status-id="${escapeHtml(id)}" aria-label="Conflict check status">
+          ${CONFLICT_STATUSES.map((s) => `<option value="${escapeHtml(s.value)}"${s.value === state.conflictStatus ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
+        </select>
+        <div class="conflict-notes-wrap">
+          <textarea class="conflict-notes-box" data-conflict-notes-id="${escapeHtml(id)}" placeholder="Conflict check notes — outcome, parties checked, date requested…">${escapeHtml(state.conflictNotes || '')}</textarea>
+        </div>
       </div>
       <div class="leap-row">
         <div class="leap-item actioned-item"><input type="checkbox" data-flag="actioned" data-id="${escapeHtml(id)}" ${state.actioned ? 'checked' : ''}><label>&#x2705; Actioned</label></div>
@@ -2617,6 +2668,103 @@ function attachDraftModal() {
   draftModalBound = true;
 }
 
+// ── Conflict check handlers ───────────────────────────────────────────────────
+async function handleConflictStatusChange(target) {
+  const leadId = target.dataset.conflictStatusId;
+  if (!leadId) return;
+  setLeadState(leadId, { conflictStatus: target.value || '' });
+  render();
+  try {
+    await saveStateRemote(leadId);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+let conflictNotesTimer;
+async function handleConflictNotesChange(target) {
+  const leadId = target.dataset.conflictNotesId;
+  if (!leadId) return;
+  setLeadState(leadId, { conflictNotes: target.value });
+  clearTimeout(conflictNotesTimer);
+  conflictNotesTimer = setTimeout(async () => {
+    try {
+      await saveStateRemote(leadId);
+    } catch (error) {
+      handleError(error);
+    }
+  }, 350);
+}
+
+function buildXenaConflictCheckPrompt(lead) {
+  const name = String(lead.sender_name || '').trim() || 'Unknown';
+  const otherParty = String(lead.opposing_party || '').trim();
+  const otherPartyLine = (otherParty && otherParty !== 'Unknown')
+    ? `Other party: ${otherParty}`
+    : `Other party: [please advise if known]`;
+  const matterType = String(lead.matter_type || '').trim() || 'Unknown';
+  const phone = String(lead.sender_phone || lead.phone || '').trim() || 'Unknown';
+  const email = String(lead.sender_email || '').trim() || 'Unknown';
+  const notes = String(lead.raw_preview || lead.notes || '').trim();
+  return [
+    `Hi Xena, can you please run a conflict check for the following matter:`,
+    ``,
+    `Client / Sender: ${name}`,
+    otherPartyLine,
+    `Matter type: ${matterType}`,
+    `Phone: ${phone}`,
+    `Email: ${email}`,
+    notes ? `Summary: ${notes}` : `Summary: [see enquiry details]`,
+    ``,
+    `Children / DOBs: [please advise if relevant]`,
+    ``,
+    `Please let me know the outcome at your earliest convenience. Thank you.`,
+  ].join('\n');
+}
+
+async function handleAskXenaConflictCheck(leadId) {
+  const lead = app.leads.find((l, i) => getLeadId(l, i) === leadId);
+  if (!lead) return;
+  const state = getLeadState(leadId);
+  const prompt = buildXenaConflictCheckPrompt(lead);
+
+  if (!state.conflictStatus) {
+    setLeadState(leadId, { conflictStatus: 'requested' });
+    render();
+    try { await saveStateRemote(leadId); } catch {}
+  }
+
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(prompt);
+    copied = true;
+  } catch {
+    // clipboard not available — fall through to share or notice
+  }
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ text: prompt });
+      showNotice('Conflict check prompt shared to Telegram/Xena.', 'info');
+      return;
+    } catch {
+      // user cancelled share — fall through to clipboard notice
+    }
+  }
+
+  if (copied) {
+    showNotice('Conflict check prompt copied to clipboard \u2014 paste into Telegram/Xena to send.', 'info');
+  } else {
+    // Last resort: populate the conflict notes textarea with the prompt so it can be copied manually
+    const textarea = document.querySelector(`textarea[data-conflict-notes-id="${CSS.escape(leadId)}"]`);
+    if (textarea && !textarea.value.trim()) {
+      textarea.value = prompt;
+      handleConflictNotesChange(textarea);
+    }
+    showNotice('Could not copy automatically \u2014 prompt has been placed in the conflict notes field for manual copying.', 'info');
+  }
+}
+
 // ── Event binding ────────────────────────────────────────────────────────────
 function attachEvents() {
   // Hero tile taps — capture-phase delegation, de-duped, for iOS Safari reliability
@@ -2666,9 +2814,12 @@ function attachEvents() {
     if (event.target.matches('textarea[data-comment-id]')) handleCommentChange(event.target);
     if (event.target.matches('select[data-prospect-status-id]')) void handleProspectStatusChange(event.target);
     if (event.target.matches('input[data-followup-date-id]')) void handleFollowUpDateChange(event.target);
+    if (event.target.matches('select[data-conflict-status-id]')) void handleConflictStatusChange(event.target);
+    if (event.target.matches('textarea[data-conflict-notes-id]')) handleConflictNotesChange(event.target);
   });
   els.list.addEventListener('input', (event) => {
     if (event.target.matches('textarea[data-comment-id]')) handleCommentChange(event.target);
+    if (event.target.matches('textarea[data-conflict-notes-id]')) handleConflictNotesChange(event.target);
   });
   els.list.addEventListener('click', (event) => {
     const pipelineBtn = event.target.closest('button[data-pipeline-action]');
@@ -2685,6 +2836,7 @@ function attachEvents() {
     if (event.target.matches('button[data-toggle-dismissed]')) { toggleInboxShowDismissed(); return; }
     if (event.target.matches('button[data-triage-id]')) { void triageInboxEmail(event.target.dataset.triageId); return; }
     if (event.target.matches('button[data-clear-triage]')) { clearAiTriage(event.target.dataset.clearTriage); return; }
+    if (event.target.matches('button[data-xena-conflict-id]')) { void handleAskXenaConflictCheck(event.target.dataset.xenaConflictId); return; }
 
     const callBtn = event.target.closest('button[data-call-phone]');
     if (callBtn) {
