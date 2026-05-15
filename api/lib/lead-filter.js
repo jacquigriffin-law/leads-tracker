@@ -3,8 +3,9 @@
 // Relevance filter for the live Inbox.
 //
 // Scoring model:
-//   scoreEmail() returns an integer — positive means likely lead, negative means noise.
+//   scoreEmail() returns an integer — positive means likely new lead, negative means noise.
 //   isSystemEmail() wraps scoreEmail() for the existing boolean API (score < 0 → hide).
+//   isLikelyNewLead() is stricter for the live LeadFlow Inbox (score > 0 → show).
 //
 // Priority order inside scoreEmail:
 //   1. Protected lead domains → always show (score = +100)
@@ -12,7 +13,8 @@
 //   3. Blocked automated local-parts → always hide (score = -80)
 //   4. Lead subject/sender signals → +20 each
 //   5. Noise/admin subject signals  → -20 each
-//   Neutral emails (score = 0) are shown — conservative by default.
+//   Neutral emails (score = 0) are not new leads. They belong in ordinary inbox
+//   triage/follow-up tooling, not the New Inbox lead queue.
 
 // ── Allowlist: protected lead sources ──────────────────────────────────────────
 // Emails from these domains are always shown regardless of subject content.
@@ -183,10 +185,11 @@ const NOISE_SUBJECT_SIGNALS = [
  * @param {string} subject     Email subject line
  * @returns {number}  Positive = likely lead/relevant; negative = noise; 0 = uncertain (show)
  */
-function scoreEmail(fromEmail, fromName, subject) {
+function scoreEmail(fromEmail, fromName, subject, snippet = '') {
   const addr  = (fromEmail || '').toLowerCase().trim();
   const name  = (fromName  || '').toLowerCase();
   const subj  = (subject   || '').toLowerCase();
+  const body  = (snippet   || '').toLowerCase();
   const atIdx = addr.lastIndexOf('@');
   const local  = atIdx !== -1 ? addr.slice(0, atIdx) : '';
   const domain = atIdx !== -1 ? addr.slice(atIdx + 1) : '';
@@ -208,11 +211,11 @@ function scoreEmail(fromEmail, fromName, subject) {
         local.startsWith(name_ + '_') || local.startsWith(name_ + '-')) return -80;
   }
 
-  // 4. Score by subject and sender name signals.
+  // 4. Score by subject, snippet and sender name signals.
   let score = 0;
 
   for (const sig of LEAD_SUBJECT_SIGNALS) {
-    if (subj.includes(sig)) { score += 20; break; }
+    if (subj.includes(sig) || body.includes(sig)) { score += 20; break; }
   }
 
   for (const sig of LEAD_SENDER_SIGNALS) {
@@ -220,10 +223,10 @@ function scoreEmail(fromEmail, fromName, subject) {
   }
 
   for (const sig of NOISE_SUBJECT_SIGNALS) {
-    if (subj.includes(sig)) { score -= 20; break; }
+    if (subj.includes(sig) || body.includes(sig)) { score -= 20; break; }
   }
 
-  // Neutral (score = 0) is shown — conservative default.
+  // Neutral (score = 0) is not a likely new lead.
   return score;
 }
 
@@ -234,8 +237,22 @@ function scoreEmail(fromEmail, fromName, subject) {
  * @param {string} subject
  * @returns {boolean}
  */
-function isSystemEmail(fromEmail, fromName, subject) {
-  return scoreEmail(fromEmail, fromName, subject) < 0;
+function isSystemEmail(fromEmail, fromName, subject, snippet = '') {
+  return scoreEmail(fromEmail, fromName, subject, snippet) < 0;
 }
 
-module.exports = { isSystemEmail, scoreEmail };
+/**
+ * Returns true only for emails suitable for the New Inbox lead queue.
+ * Neutral human replies are deliberately excluded; they can be handled by
+ * follow-up triage without being proposed as new leads.
+ * @param {string} fromEmail
+ * @param {string} fromName
+ * @param {string} subject
+ * @param {string} snippet
+ * @returns {boolean}
+ */
+function isLikelyNewLead(fromEmail, fromName, subject, snippet = '') {
+  return scoreEmail(fromEmail, fromName, subject, snippet) > 0;
+}
+
+module.exports = { isSystemEmail, isLikelyNewLead, scoreEmail };

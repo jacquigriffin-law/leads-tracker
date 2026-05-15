@@ -6,7 +6,7 @@
 'use strict';
 
 const path = require('path');
-const { isSystemEmail, scoreEmail } = require(path.join(__dirname, '..', 'api', 'lib', 'lead-filter'));
+const { isLikelyNewLead, isSystemEmail, scoreEmail } = require(path.join(__dirname, '..', 'api', 'lib', 'lead-filter'));
 
 let passed = 0;
 let failed = 0;
@@ -24,6 +24,8 @@ function assert(label, condition, detail) {
 // Helpers
 const show = (email, name, subj) => !isSystemEmail(email, name, subj);
 const hide = (email, name, subj) =>  isSystemEmail(email, name, subj);
+const lead = (email, name, subj, snippet = '') => isLikelyNewLead(email, name, subj, snippet);
+const notLead = (email, name, subj, snippet = '') => !isLikelyNewLead(email, name, subj, snippet);
 
 // ── Protected lead domains: always show ───────────────────────────────────────
 
@@ -48,6 +50,12 @@ assert('InfoTrack sync update hidden',
 
 assert('PythonAnywhere support hidden',
   hide('support@pythonanywhere.com', 'PythonAnywhere Support', 'Your PythonAnywhere invoice'));
+
+assert('ROSH and Safety Assessment reply not proposed as a new lead',
+  notLead('dylanpaulsmith1@gmail.com', 'Dylan Smith', 'Re: ROSH & Safety Assessment', 'Myself Mel and DCJ'));
+
+assert('HDCG Open Day community email not proposed as a new lead',
+  notLead('susan.kilgour@bigpond.com', 'Susan Kilgour', 'RE: HDCG Open Day talk', 'Good afternoon garden gurus, Thank you for participating in the HD Community Garden Open Day.'));
 
 // ── Blocked operational domains ───────────────────────────────────────────────
 
@@ -104,12 +112,20 @@ assert('DVO matter shows', show('client@yahoo.com', 'Client', 'DVO application -
 assert('Consent orders shows', show('user@icloud.com', 'User', 'Consent orders question'));
 assert('SMS from shows', show('forward@forward-sms.app', 'SMS Forwarder', 'SMS from 0400 111 222'));
 
+assert('LawAccessNSW offer is a new lead',
+  lead('donotreply@legalaid.nsw.gov.au', 'LawAccessNSW', 'Offer of work from Legal Aid NSW - Family Law matter', 'You have received an offer of work from Legal Aid NSW.'));
+
+assert('Clear new-client language in snippet is a new lead',
+  lead('person@gmail.com', 'Potential Client', 'Hello', 'I need a solicitor for a parenting matter and would like legal advice.'));
+
 // ── Neutral unknown senders: show by default ──────────────────────────────────
 
-console.log('\nNeutral/unknown senders (conservative — show by default)');
+console.log('\nNeutral/unknown senders (not new leads)');
 
 assert('Unknown sender with generic subject shows', show('someone@unknown.com', 'Someone', 'Hello'));
 assert('Generic hello shows', show('info@randomfirm.com.au', 'Random Firm', 'Hello there'));
+assert('Unknown sender with generic subject is not a new lead', notLead('someone@unknown.com', 'Someone', 'Hello'));
+assert('Generic hello is not a new lead', notLead('info@randomfirm.com.au', 'Random Firm', 'Hello there'));
 
 // ── scoreEmail boundary tests ─────────────────────────────────────────────────
 

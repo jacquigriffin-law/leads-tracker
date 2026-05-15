@@ -1139,9 +1139,9 @@ function renderInbox() {
     ? '<div class="inbox-stale-note">Inbox temporarily unavailable \u2014 showing last loaded messages. Retrying automatically.</div>'
     : '';
   const hiddenNote = app.inboxHiddenCount > 0
-    ? ` &mdash; <span title="System notifications, deployment alerts and auth emails are excluded automatically.">${app.inboxHiddenCount} system email${app.inboxHiddenCount !== 1 ? 's' : ''} filtered</span>`
+    ? ` &mdash; <span title="Ordinary replies, admin, newsletters, system notifications and low-confidence items are excluded automatically.">${app.inboxHiddenCount} non-lead email${app.inboxHiddenCount !== 1 ? 's' : ''} filtered</span>`
     : '';
-  let html = staleBanner + `<div class="inbox-header">Live inbox (likely leads and follow-up replies) &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}${hiddenNote}. Use <em>Import as New Lead</em>, <em>Add to Follow-up</em>, or <em>Existing matter</em>. <em>Dismiss</em> hides here only &mdash; email stays in your mailbox.</div>`;
+  let html = staleBanner + `<div class="inbox-header">Live inbox (likely new legal leads) &mdash; <strong>${escapeHtml(accountLabel)}</strong> &mdash; ${pending.length} message${pending.length !== 1 ? 's' : ''}${hiddenNote}. Use <em>Import as New Lead</em>, <em>Add to Follow-up</em>, or <em>Existing matter</em>. <em>Dismiss</em> hides here only &mdash; email stays in your mailbox.</div>`;
 
   if (pending.length) {
     html += pending.map((e) => renderInboxEmail(e, false)).join('');

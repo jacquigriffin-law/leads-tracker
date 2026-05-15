@@ -17,7 +17,7 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { createHmac, timingSafeEqual } = require('crypto');
 const { minimiseBody, redactPii, detectInjection } = require('./lib/email-privacy');
-const { isSystemEmail } = require('./lib/lead-filter');
+const { isLikelyNewLead } = require('./lib/lead-filter');
 
 const ImapFlowRef = { current: ImapFlow };
 const simpleParserRef = { current: simpleParser };
@@ -405,9 +405,10 @@ module.exports = async (req, res) => {
     .flat()
     .sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
 
-  // Filter out system/operational emails (deployments, auth, platform notices).
-  // hidden_count is returned so the UI can note that filtering is active.
-  const leadEmails = allEmails.filter((e) => !isSystemEmail(e.from_email, e.from_name, e.subject));
+  // Keep only likely new legal leads/referrals for the LeadFlow New Inbox.
+  // Neutral human replies are excluded here so ordinary inbox follow-ups do not
+  // get proposed as new leads.
+  const leadEmails = allEmails.filter((e) => isLikelyNewLead(e.from_email, e.from_name, e.subject, e.snippet));
   const hiddenCount = allEmails.length - leadEmails.length;
   if (hiddenCount > 0) {
     audit('inbox.system_filtered', { ip: clientIp, user: authedUser, hidden_count: hiddenCount });
