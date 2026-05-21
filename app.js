@@ -98,7 +98,8 @@ const els = {
   heroFilterIndicator: document.getElementById('heroFilterIndicator'),
   heroStatUrgent: document.getElementById('heroStatUrgent'),
   heroStatNew: document.getElementById('heroStatNew'),
-  heroStatAging: document.getElementById('heroStatAging')
+  heroStatAging: document.getElementById('heroStatAging'),
+  commandCentre: document.getElementById('commandCentre')
 };
 
 // ── App state ────────────────────────────────────────────────────────────────
@@ -1669,6 +1670,74 @@ function isLeadAtRiskForPipeline(lead, state) {
   return ['due', 'stale', 'ready'].includes(priorityBucket);
 }
 
+function getCommandCentreStats() {
+  const visibleLeads = getVisibleLeads();
+  const activeLeads = visibleLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) !== 'closed';
+  });
+  const inboxUnread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
+  const urgent = activeLeads.filter((lead) => String(lead.priority || '').toUpperCase() === 'URGENT');
+  const overdueFollowUps = activeLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    const bucket = getFollowUpPriority(lead, state)?.bucket || '';
+    return bucket === 'due' || bucket === 'stale';
+  });
+  const conflictPending = activeLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return !state.conflictStatus || ['requested', 'needs_review', 'possible_conflict'].includes(state.conflictStatus);
+  });
+  const ready = activeLeads.filter((lead) => {
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    return getPipelineTab(lead, state) === 'ready';
+  });
+  const nextLead = urgent[0] || overdueFollowUps[0] || ready[0] || activeLeads[0] || null;
+  const nextLeadState = nextLead ? getLeadState(getLeadId(nextLead, app.leads.indexOf(nextLead))) : null;
+  let nextAction = 'No active lead work waiting';
+  let nextDetail = 'You are clear for now. Check Inbox, add a phone enquiry, or review closed leads.';
+  if (nextLead) {
+    const name = nextLead.sender_name || 'Unnamed lead';
+    const phone = nextLead.sender_phone || nextLead.phone || '';
+    const status = nextLeadState?.prospectiveStatus ? getProspectStatusLabel(nextLeadState.prospectiveStatus) : 'New enquiry';
+    nextAction = urgent.includes(nextLead) ? `Call or reply to ${name}` : `Review ${name}`;
+    nextDetail = `${status} · ${inferType(nextLead)}${phone ? ` · ${phone}` : ''}`;
+  } else if (inboxUnread) {
+    nextAction = 'Review new Inbox items';
+    nextDetail = `${inboxUnread} message${inboxUnread === 1 ? '' : 's'} waiting to be imported, dismissed, or marked as existing matter.`;
+  }
+  const riskCount = urgent.length + overdueFollowUps.length + ready.length + conflictPending.length + inboxUnread;
+  return { active: activeLeads.length, inboxUnread, urgent: urgent.length, overdue: overdueFollowUps.length, conflictPending: conflictPending.length, ready: ready.length, riskCount, nextAction, nextDetail };
+}
+
+function renderCommandCentre() {
+  if (!els.commandCentre) return;
+  const stats = getCommandCentreStats();
+  const hasData = stats.active || stats.inboxUnread || app.currentTab !== 'closed';
+  els.commandCentre.hidden = !hasData;
+  if (!hasData) return;
+  els.commandCentre.innerHTML = `
+    <div class="command-centre-top">
+      <div>
+        <div class="command-centre-kicker">Today&apos;s command centre</div>
+        <div class="command-centre-title">${escapeHtml(stats.nextAction)}</div>
+        <div class="command-centre-sub">${escapeHtml(stats.nextDetail)}</div>
+      </div>
+      <span class="command-centre-badge">${stats.riskCount} to check</span>
+    </div>
+    <div class="command-centre-grid">
+      <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.inboxUnread}</span><span class="command-centre-metric-label">Inbox to triage</span></div>
+      <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.overdue}</span><span class="command-centre-metric-label">Follow-up due</span></div>
+      <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.conflictPending}</span><span class="command-centre-metric-label">Conflict pending</span></div>
+      <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.ready}</span><span class="command-centre-metric-label">Ready to open</span></div>
+    </div>
+    <div class="command-centre-actions">
+      <button class="btn-pipeline btn-pipeline-primary" type="button" data-command-tab="inbox">Check Inbox</button>
+      <button class="btn-pipeline btn-pipeline-neutral" type="button" data-command-tab="followup">Follow-up Queue</button>
+      <button class="btn-pipeline btn-pipeline-neutral" type="button" data-command-tab="ready">Ready to Open</button>
+      <button class="btn-pipeline btn-pipeline-warning" type="button" data-command-tab="new_leads">New Leads</button>
+    </div>`;
+}
+
 function renderHeroFilteredLeads() {
   const visibleLeads = getVisibleLeads();
   let title = '';
@@ -1836,6 +1905,7 @@ function updateSummary() {
   } else {
     els.lastUpdatedLine.textContent = 'Last sync: checking…';
   }
+  renderCommandCentre();
   if (els.updateNowLink) els.updateNowLink.href = `./?update=${Date.now()}`;
 }
 
@@ -2793,6 +2863,18 @@ function attachEvents() {
       els.filterToggle.classList.toggle('filter-panel-open', isOpen);
     });
   }
+
+  document.addEventListener('click', (event) => {
+    const commandTabButton = event.target.closest('[data-command-tab]');
+    if (!commandTabButton) return;
+    app.currentTab = commandTabButton.dataset.commandTab;
+    app.heroFilter = 'all';
+    clearHeroFilterUrl();
+    updateTabUi();
+    updateHeroFilterUi();
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
 
   document.querySelectorAll('.tab').forEach((button) => {
     button.addEventListener('click', () => {

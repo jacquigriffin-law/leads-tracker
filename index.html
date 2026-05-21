@@ -73,6 +73,23 @@ body::after{content:"";position:fixed;inset:auto -10% 8% auto;width:260px;height
 .hero-back-chip:hover{background:#122e74}
 .hero-back-chip:active{transform:scale(.96)}
 
+
+/* ── Daily command centre ── */
+.command-centre{display:grid;gap:12px;margin:0 0 14px;padding:15px;border-radius:20px;border:1px solid #d7e2ef;background:linear-gradient(180deg,#fff 0%,#f8fbff 100%);box-shadow:var(--shadow-soft)}
+.command-centre[hidden]{display:none!important}
+.command-centre-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.command-centre-kicker{font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:#6d8099;margin-bottom:4px}
+.command-centre-title{font-size:17px;font-weight:900;letter-spacing:-.03em;color:#091f42;line-height:1.2}
+.command-centre-sub{font-size:13px;color:#52657d;margin-top:4px;line-height:1.35}
+.command-centre-badge{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:34px;padding:0 10px;border-radius:999px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;font-size:13px;font-weight:900;white-space:nowrap}
+.command-centre-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.command-centre-metric{padding:10px;border-radius:14px;background:#fff;border:1px solid var(--line);min-height:66px}
+.command-centre-metric-value{display:block;font-size:22px;font-weight:900;letter-spacing:-.04em;color:#102f58;line-height:1}
+.command-centre-metric-label{display:block;margin-top:5px;font-size:11px;font-weight:800;color:#6d8099;line-height:1.25}
+.command-centre-actions{display:flex;gap:8px;flex-wrap:wrap}
+.command-centre-actions .btn-pipeline{font-size:12px;padding:8px 11px}
+@media(max-width:640px){.command-centre{margin-top:0}.command-centre-grid{grid-template-columns:repeat(2,1fr)}.command-centre-top{align-items:center}.command-centre-title{font-size:16px}}
+
 /* ── Tabs: rounded segmented control ── */
 .tabs{display:flex;gap:4px;margin-bottom:14px;padding:5px;border-radius:18px;border:1px solid var(--line);box-shadow:0 5px 18px rgba(12,27,45,.05);background:#fff}
 .tab{flex:1;padding:12px 8px;text-align:center;border-radius:14px;cursor:pointer;font-weight:800;font-size:14px;background:transparent;border:none;color:#50627a;transition:all .16s ease;display:inline-flex;align-items:center;justify-content:center;gap:7px}
@@ -504,6 +521,9 @@ button{font:inherit}
 
   <div class="notice" id="notice" hidden></div>
   <div class="hero-filter-indicator" id="heroFilterIndicator" hidden></div>
+
+
+  <section class="command-centre" id="commandCentre" hidden aria-live="polite"></section>
 
   <div class="tabs">
     <button class="tab active" data-tab="new_leads">New Leads</button>
