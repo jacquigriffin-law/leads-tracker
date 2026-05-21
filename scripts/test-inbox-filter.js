@@ -29,7 +29,7 @@ const notLead = (email, name, subj, snippet = '') => !isLikelyNewLead(email, nam
 
 // ── Protected lead domains: always show ───────────────────────────────────────
 
-console.log('\nProtected lead domains (always show)');
+console.log('\nTrusted lead sources');
 
 assert('Legal Aid NSW shows', show('grants@legalaid.nsw.gov.au', 'Legal Aid NSW', 'Grant of Aid approval'));
 assert('LawConnect shows', show('referral@lawconnect.com.au', 'LawConnect', 'New client referral'));
@@ -37,6 +37,10 @@ assert('Finchly shows', show('intake@finchly.com.au', 'Finchly', 'New enquiry re
 assert('SMS forwarder shows', show('sms@forward-sms.app', 'Forward SMS', 'SMS from 0412 345 678'));
 assert('NT Legal Aid shows', show('case@legalaid.nt.gov.au', 'NT Legal Aid', 'New matter'));
 assert('NAAJA shows', show('referral@naaja.com.au', 'NAAJA', 'Referral - criminal matter'));
+assert('Legal Aid admin bulletin is not a new lead',
+  notLead('news@legalaid.nsw.gov.au', 'Legal Aid NSW', 'Training bulletin', 'Upcoming CPD and training information.'));
+assert('Legal Aid meeting agenda is hidden from new lead queue',
+  notLead('admin@legalaid.nsw.gov.au', 'Legal Aid NSW', 'Meeting agenda', 'Agenda for the next stakeholder meeting.'));
 
 // ── The specific examples from the reported issue ─────────────────────────────
 
@@ -131,8 +135,8 @@ assert('Generic hello is not a new lead', notLead('info@randomfirm.com.au', 'Ran
 
 console.log('\nscoreEmail boundaries');
 
-const protectedScore = scoreEmail('grant@legalaid.nsw.gov.au', 'Legal Aid', 'Grant approved');
-assert('Protected lead domain returns score >= 100', protectedScore >= 100);
+const trustedReferralScore = scoreEmail('grant@legalaid.nsw.gov.au', 'Legal Aid', 'Grant of Aid approved');
+assert('Trusted referral domain with lead language returns positive score', trustedReferralScore > 0);
 
 const blockedScore = scoreEmail('sync@infotrack.com.au', 'InfoTrack', 'Family Court Sync');
 assert('Blocked operational domain returns score <= -100', blockedScore <= -100);
