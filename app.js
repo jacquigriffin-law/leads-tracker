@@ -82,8 +82,11 @@ const els = {
   showAuthBtn: document.getElementById('showAuthBtn'),
   authPanel: document.getElementById('authPanel'),
   authEmail: document.getElementById('authEmail'),
+  authCodeRow: document.getElementById('authCodeRow'),
+  authOtp: document.getElementById('authOtp'),
   authStatus: document.getElementById('authStatus'),
   sendMagicLinkBtn: document.getElementById('sendMagicLinkBtn'),
+  verifyOtpBtn: document.getElementById('verifyOtpBtn'),
   signOutBtn: document.getElementById('signOutBtn'),
   notice: document.getElementById('notice'),
   search: document.getElementById('search'),
@@ -109,6 +112,7 @@ const app = {
   session: null,
   currentTab: 'new_leads',
   heroFilter: 'all',
+  pendingAuthEmail: '',
   leads: [],
   lastUpdated: '',
   state: {},
@@ -848,14 +852,23 @@ function refreshAuthUi() {
   if (email) {
     els.authEmail.hidden = true;
     els.sendMagicLinkBtn.hidden = true;
+    if (els.authCodeRow) els.authCodeRow.hidden = true;
+    if (els.authOtp) els.authOtp.value = '';
+    app.pendingAuthEmail = '';
     els.authStatus.textContent = `Signed in as ${email}`;
   } else {
     els.authEmail.hidden = false;
     els.sendMagicLinkBtn.hidden = false;
+    if (els.authCodeRow) els.authCodeRow.hidden = !app.pendingAuthEmail;
     const isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-    els.authStatus.textContent = isPwa
-      ? 'This Home Screen version cannot reliably save magic-link login on iPhone. Open LeadFlow in Safari, send the sign-in link there, and keep using the Safari page.'
-      : 'Sign in once to sync across phone and laptop. On iPhone, keep using LeadFlow in Safari — not the old Home Screen icon — so the saved login stays available.';
+    const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
+    els.authStatus.textContent = app.pendingAuthEmail
+      ? `Check ${app.pendingAuthEmail} for the sign-in code, then type it here. This signs in this exact ${isPwa ? 'Home Screen app' : isLikelyEmbeddedBrowser ? 'in-app browser' : 'browser'} so it should stop asking repeatedly.`
+      : isPwa
+        ? 'For Home Screen use, send a code and type it here. Avoid only tapping the email link, because iPhone may open it in Safari instead of this app.'
+        : isLikelyEmbeddedBrowser
+          ? 'This looks like an in-app browser. Send a code and type it here, or open LeadFlow in Safari for the most reliable saved login.'
+          : 'Sign in once to sync across phone and laptop. On iPhone, type the email code into this same Safari page so the saved login stays available.';
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -3001,15 +3014,16 @@ function attachEvents() {
         options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` }
       });
       if (error) throw error;
+      app.pendingAuthEmail = email;
+      if (els.authCodeRow) els.authCodeRow.hidden = false;
+      if (els.authOtp) {
+        els.authOtp.value = '';
+        setTimeout(() => els.authOtp?.focus(), 100);
+      }
+      refreshAuthUi();
       setMagicLinkCooldown();
       setSyncStatus('Email sent');
-      const _isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-      showNotice(
-        _isPwa
-          ? 'Magic link sent. It will open in Safari. After signing in, keep using the Safari page — the old Home Screen app has separate storage and may still look signed out.'
-          : 'Magic link sent. Open it in Safari, then keep using this Safari page. Your session should persist here.',
-        'info'
-      );
+      showNotice('Sign-in email sent. Best on iPhone: type the code from the email into this screen instead of switching browsers.', 'info');
     } catch (error) {
       const message = error?.message || '';
       if (/rate limit/i.test(message)) {
@@ -3022,6 +3036,40 @@ function attachEvents() {
     } finally {
       els.sendMagicLinkBtn.disabled = false;
       els.sendMagicLinkBtn.textContent = originalLabel;
+    }
+  });
+
+  els.verifyOtpBtn?.addEventListener('click', async () => {
+    const originalLabel = els.verifyOtpBtn.textContent;
+    try {
+      if (!(app.supabase && isSupabaseEnabled())) return;
+      const email = (app.pendingAuthEmail || els.authEmail.value || '').trim();
+      const token = (els.authOtp?.value || '').replace(/\s+/g, '').trim();
+      if (!email) throw new Error('Enter your email address first.');
+      if (!token) throw new Error('Enter the code from your email.');
+      els.verifyOtpBtn.disabled = true;
+      els.verifyOtpBtn.textContent = 'Verifying…';
+      const { data, error } = await app.supabase.auth.verifyOtp({ email, token, type: 'email' });
+      if (error) throw error;
+      if (data?.session) app.session = data.session;
+      app.pendingAuthEmail = '';
+      if (els.authOtp) els.authOtp.value = '';
+      setSyncStatus('Signed in');
+      refreshAuthUi();
+      await hydrate();
+      showNotice('Signed in on this device. LeadFlow should now stay signed in here.', 'success');
+    } catch (error) {
+      handleError(error);
+    } finally {
+      els.verifyOtpBtn.disabled = false;
+      els.verifyOtpBtn.textContent = originalLabel;
+    }
+  });
+
+  els.authOtp?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      els.verifyOtpBtn?.click();
     }
   });
 
