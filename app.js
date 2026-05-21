@@ -1793,6 +1793,16 @@ function renderNewLeadsTab() {
     return getPipelineTab(lead, state) === 'new_leads';
   });
   if (!newLeads.length) {
+    const closedLeads = visibleLeads.filter((lead) => {
+      const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+      return getPipelineTab(lead, state) === 'closed';
+    });
+    if (closedLeads.length) {
+      els.list.innerHTML = `<div class="pipeline-onboard"><strong>Your leads are still here</strong><p>No leads are currently marked as new, so LeadFlow has put ${closedLeads.length} lead${closedLeads.length === 1 ? '' : 's'} in Closed. They are shown below so the tracker never looks empty.</p><button class="btn-pipeline btn-pipeline-primary" type="button" data-command-tab="closed">Open Closed tab</button></div>` +
+        renderPipelineSection('Closed leads', closedLeads, 'Nothing closed yet.');
+      els.emptyState.hidden = true;
+      return;
+    }
     els.list.innerHTML = `<div class="pipeline-onboard"><strong>No new leads</strong><p>New leads from email, SMS, and portal enquiries appear here. Import from Inbox or add manually. Once you contact a lead, mark them as Contacted to move to Follow-up.</p></div>`;
     els.emptyState.hidden = true;
     return;
