@@ -514,14 +514,14 @@ button{font:inherit}
   <div class="auth-panel" id="authPanel" hidden>
     <div class="auth-row">
       <input id="authEmail" type="email" placeholder="jacquigriffin@mobilesolicitor.com.au" autocomplete="email"/>
-      <button class="btn btn-primary" id="sendMagicLinkBtn">Send sign-in code</button>
+      <button class="btn btn-primary" id="sendMagicLinkBtn">Email me a code</button>
       <button class="btn btn-secondary" id="signOutBtn" hidden>Sign out</button>
     </div>
     <div class="auth-code-row" id="authCodeRow" hidden>
       <input id="authOtp" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6 digit code" autocomplete="one-time-code"/>
       <button class="btn btn-secondary" id="verifyOtpBtn">Verify code</button>
     </div>
-    <div class="muted" id="authStatus">Sign in once to sync across phone and laptop. On iPhone, type the email code into this same screen so the saved login stays on this device.</div>
+    <div class="muted" id="authStatus">Sign in once with a code. On iPhone, do not tap the email magic link — type the code into this same LeadFlow screen so the saved login stays on this device.</div>
   </div>
 
   <div class="notice" id="notice" hidden></div>
