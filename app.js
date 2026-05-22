@@ -88,6 +88,7 @@ const els = {
   sendMagicLinkBtn: document.getElementById('sendMagicLinkBtn'),
   verifyOtpBtn: document.getElementById('verifyOtpBtn'),
   signOutBtn: document.getElementById('signOutBtn'),
+  installHelpBtn: document.getElementById('installHelpBtn'),
   notice: document.getElementById('notice'),
   search: document.getElementById('search'),
   sourceFilter: document.getElementById('sourceFilter'),
@@ -156,6 +157,10 @@ function setSyncStatus(message) {
 
 function setDefaultSyncStatus() {
   setSyncStatus(app.supabase ? (app.session ? 'Syncing across devices' : 'Saved on this phone') : 'Saved on this phone');
+}
+
+function isHomeScreenApp() {
+  return Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
 }
 
 function getMagicLinkCooldownRemainingMs() {
@@ -860,7 +865,7 @@ function refreshAuthUi() {
     els.authEmail.hidden = false;
     els.sendMagicLinkBtn.hidden = false;
     if (els.authCodeRow) els.authCodeRow.hidden = !app.pendingAuthEmail;
-    const isPwa = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    const isPwa = isHomeScreenApp();
     const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
     els.authStatus.textContent = app.pendingAuthEmail
       ? `Check ${app.pendingAuthEmail} for the sign-in code, then type it here. This signs in this exact ${isPwa ? 'Home Screen app' : isLikelyEmbeddedBrowser ? 'in-app browser' : 'browser'} so it should stop asking repeatedly.`
@@ -3076,6 +3081,13 @@ function attachEvents() {
     }
   });
 
+  els.installHelpBtn?.addEventListener('click', () => {
+    const message = isHomeScreenApp()
+      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, send a code and type the code into this same app screen once.'
+      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once inside that icon by typing the email code into the app.';
+    showNotice(message, 'info');
+  });
+
   els.authOtp?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -3113,6 +3125,7 @@ function handleError(error) {
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 async function start() {
+  registerServiceWorker();
   attachEvents();
   attachCallModal();
   attachDraftModal();
@@ -3122,6 +3135,15 @@ async function start() {
   await hydrate();
   window.__heroReady = true;
   window.__heroFallback = (f) => applyHeroFilter(f);
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error) => {
+      console.warn('LeadFlow service worker registration failed', error);
+    });
+  });
 }
 
 start().catch(handleError);
