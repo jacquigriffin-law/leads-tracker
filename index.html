@@ -3,10 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<!-- Keep LeadFlow in Safari rather than iOS standalone mode. Supabase magic
-     links open in Safari, and iOS Home Screen web apps keep separate storage,
-     which makes sessions appear not to save. -->
-<meta name="apple-mobile-web-app-capable" content="no"/>
+<!-- LeadFlow can run as an iPhone Home Screen app. Sign in by typing the email
+     code into the app screen so the session is saved in this exact context. -->
+<meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LeadFlow"/>
 <meta name="theme-color" content="#0a1740"/>
@@ -226,9 +225,11 @@ a.contact-link:hover{text-decoration:underline}
 
 /* auth + notice */
 .auth-panel{border:1.5px solid var(--line-strong);border-radius:var(--radius-xl);padding:14px;box-shadow:var(--shadow-soft);margin-bottom:12px;background:#fff}
-.auth-panel[hidden],.notice[hidden]{display:none!important}
+.auth-panel[hidden],.auth-code-row[hidden],.notice[hidden]{display:none!important}
 .auth-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .auth-row input{flex:1;min-width:220px}
+.auth-code-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.auth-code-row input{flex:1;min-width:170px;letter-spacing:.18em;font-weight:900;text-align:center}
 .notice{border:1.5px solid #d28a54;border-radius:14px;padding:11px 14px;margin-bottom:12px;font-size:14px;box-shadow:var(--shadow-soft);background:#fff7ef}
 
 /* buttons */
@@ -513,10 +514,14 @@ button{font:inherit}
   <div class="auth-panel" id="authPanel" hidden>
     <div class="auth-row">
       <input id="authEmail" type="email" placeholder="jacquigriffin@mobilesolicitor.com.au" autocomplete="email"/>
-      <button class="btn btn-primary" id="sendMagicLinkBtn">Send sign-in link</button>
+      <button class="btn btn-primary" id="sendMagicLinkBtn">Email me a code</button>
       <button class="btn btn-secondary" id="signOutBtn" hidden>Sign out</button>
     </div>
-    <div class="muted" id="authStatus">Sign in once to sync across phone and laptop. On iPhone, open the magic link in Safari and keep using Safari for the tracker.</div>
+    <div class="auth-code-row" id="authCodeRow" hidden>
+      <input id="authOtp" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6 digit code" autocomplete="one-time-code"/>
+      <button class="btn btn-secondary" id="verifyOtpBtn">Verify code</button>
+    </div>
+    <div class="muted" id="authStatus">Sign in once with a code. On iPhone, do not tap the email magic link — type the code into this same LeadFlow screen so the saved login stays on this device.</div>
   </div>
 
   <div class="notice" id="notice" hidden></div>
@@ -576,6 +581,7 @@ button{font:inherit}
   <div class="empty" id="emptyState" hidden>No leads match the current filters.</div>
   <div class="panel-actions">
     <a class="text-link" id="updateNowLink" href="./?update=1">Update tracker now</a>
+    <button class="text-link" id="installHelpBtn" type="button">Add iPhone icon</button>
     <button class="text-link" id="showAuthBtn" hidden>Sync settings</button>
     <span class="muted" id="syncStatusLine" hidden>Saved on this device</span>
   </div>

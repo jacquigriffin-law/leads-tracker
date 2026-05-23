@@ -8,42 +8,60 @@
 //   isLikelyNewLead() is stricter for the live LeadFlow Inbox (score > 0 → show).
 //
 // Priority order inside scoreEmail:
-//   1. Protected lead domains → always show (score = +100)
+//   1. Dedicated lead intake domains → always show (score = +100)
 //   2. Blocked operational domains → always hide (score = -100), wins over subject signals
-//   3. Blocked automated local-parts → always hide (score = -80)
-//   4. Lead subject/sender signals → +20 each
-//   5. Noise/admin subject signals  → -20 each
+//   3. Noise/admin subject signals  → strongly hide (score = -60)
+//   4. Blocked automated local-parts → hide unless a trusted referral source has
+//      strong new-lead language (e.g. Legal Aid offers often arrive from donotreply@)
+//   5. Lead subject/sender/body signals → score positively
 //   Neutral emails (score = 0) are not new leads. They belong in ordinary inbox
 //   triage/follow-up tooling, not the New Inbox lead queue.
 
-// ── Allowlist: protected lead sources ──────────────────────────────────────────
-// Emails from these domains are always shown regardless of subject content.
-const PROTECTED_LEAD_DOMAINS = new Set([
+// ── Trusted lead sources ──────────────────────────────────────────────────────
+// Dedicated intake platforms are always new-lead sources. Referral/legal-aid
+// domains are trusted, but not every message from them is a new lead, so they
+// still need new-lead/referral wording and are filtered for newsletters/admin.
+const DEDICATED_LEAD_DOMAINS = new Set([
+  'lawconnect.com.au', 'finchly.com.au', 'forward-sms.app',
+]);
+
+const TRUSTED_REFERRAL_DOMAINS = new Set([
   'legalaid.nsw.gov.au', 'lacmac.com.au', 'justice.nsw.gov.au',
   'nt.gov.au', 'nt.legal.gov.au', 'naaja.com.au', 'ntlac.nt.gov.au',
-  'lawconnect.com.au', 'finchly.com.au',
-  'forward-sms.app',
-  // Northern Territory Legal Aid Commission variants
-  'ntlac.nt.gov.au', 'legalaid.nt.gov.au',
+  'legalaid.nt.gov.au',
 ]);
 
 // ── Lead signals in subjects ───────────────────────────────────────────────────
 // Any of these in the subject indicates a likely real client or referral.
 const LEAD_SUBJECT_SIGNALS = [
-  'legal aid', 'lawconnect', 'finchly', 'grant of aid',
-  'enquiry', 'inquiry', 'referral', 'new client', 'new matter',
+  'legal aid', 'lawconnect', 'finchly', 'grant of aid', 'offer of work',
+  'enquiry', 'inquiry', 'referral', 'new client', 'new matter', 'potential client',
   'family law', 'family court', 'federal circuit', 'hearing',
   'consent orders', 'property settlement', 'parenting orders', 'divorce',
   'criminal matter', 'bail', 'sentence', 'court date', 'mention',
   'sms from', 'text from', 'forwarded sms',
   'legal advice', 'legal question', 'legal help', 'legal matter', 'legal issue',
   'need a solicitor', 'need a lawyer', 'seeking representation',
+  'looking for a solicitor', 'looking for a lawyer', 'can you represent',
   'domestic violence', 'dvo', 'intervention order', 'avo',
   'child support', 'child custody',
 ];
 
 // ── Lead signals in sender names ──────────────────────────────────────────────
 // Sender name fragments indicating a referral body or known client channel.
+const STRONG_NEW_LEAD_SIGNALS = [
+  'offer of work', 'new client', 'new matter', 'new enquiry', 'new inquiry',
+  'referral', 'referred', 'potential client', 'need a solicitor', 'need a lawyer',
+  'seeking representation', 'looking for a solicitor', 'looking for a lawyer',
+  'can you represent', 'i need legal advice', 'i need legal help', 'grant of aid',
+];
+
+const EXISTING_OR_NON_LEAD_SUBJECT_SIGNALS = [
+  're:', 'fw:', 'fwd:', 'rosh', 'safety assessment',
+  'existing matter', 'our client', 'your client', 'court list',
+  'directions hearing', 'notice of listing', 'file note', 'tax invoice',
+];
+
 const LEAD_SENDER_SIGNALS = [
   'legal aid',
   'lawconnect',
@@ -174,6 +192,10 @@ const NOISE_SUBJECT_SIGNALS = [
   // Wellness/lifestyle — clearly not legal enquiries
   'oral hygiene', 'sleep protocol', 'workout protocol', 'biohacking',
   'supplement stack', 'longevity protocol', 'health protocol',
+  // Internal/admin/non-lead community correspondence
+  'open day', 'talk invitation', 'webinar', 'seminar', 'training', 'cpd',
+  'minutes of meeting', 'meeting minutes', 'agenda', 'roster',
+  'out of office', 'automatic reply', 'auto reply',
 ];
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
@@ -193,26 +215,54 @@ function scoreEmail(fromEmail, fromName, subject, snippet = '') {
   const atIdx = addr.lastIndexOf('@');
   const local  = atIdx !== -1 ? addr.slice(0, atIdx) : '';
   const domain = atIdx !== -1 ? addr.slice(atIdx + 1) : '';
+  const text = `${subj} ${body}`;
 
-  // 1. Protected lead domains — always show.
-  for (const d of PROTECTED_LEAD_DOMAINS) {
-    if (domain === d || domain.endsWith('.' + d)) return 100;
-  }
+  const domainMatches = (domainSet) => {
+    for (const d of domainSet) {
+      if (domain === d || domain.endsWith('.' + d)) return true;
+    }
+    return false;
+  };
+
+  const isDedicatedLeadDomain = domainMatches(DEDICATED_LEAD_DOMAINS);
+  const isTrustedReferralDomain = domainMatches(TRUSTED_REFERRAL_DOMAINS);
+  const hasStrongLeadSignal = STRONG_NEW_LEAD_SIGNALS.some((sig) => text.includes(sig) || name.includes(sig));
+
+  // 1. Dedicated lead intake domains — always show.
+  if (isDedicatedLeadDomain) return 100;
 
   // 2. Blocked operational domains — always hide (runs before subject checks).
   for (const d of BLOCKED_OPERATIONAL_DOMAINS) {
     if (domain === d || domain.endsWith('.' + d)) return -100;
   }
 
-  // 3. Blocked automated local-parts — hide.
-  if (BLOCKED_LOCAL_PARTS.has(local)) return -80;
-  for (const name_ of BLOCKED_LOCAL_PARTS) {
-    if (local.startsWith(name_ + '+') || local.startsWith(name_ + '.') ||
-        local.startsWith(name_ + '_') || local.startsWith(name_ + '-')) return -80;
+  // 3. Clear noise/admin/non-lead language should not enter the new lead inbox.
+  for (const sig of NOISE_SUBJECT_SIGNALS) {
+    if (subj.includes(sig) || body.includes(sig)) return -60;
   }
 
-  // 4. Score by subject, snippet and sender name signals.
+  // Replies/forwards and existing-matter correspondence should not appear as new
+  // leads unless they contain strong referral/new-client wording.
+  if (!hasStrongLeadSignal) {
+    for (const sig of EXISTING_OR_NON_LEAD_SUBJECT_SIGNALS) {
+      if (text.includes(sig)) return -40;
+    }
+  }
+
+  // 4. Blocked automated local-parts — hide, except trusted referral domains with
+  // strong new-lead language (Legal Aid offers can be donotreply@...).
+  if (BLOCKED_LOCAL_PARTS.has(local) && !(isTrustedReferralDomain && hasStrongLeadSignal)) return -80;
+  for (const name_ of BLOCKED_LOCAL_PARTS) {
+    if (local.startsWith(name_ + '+') || local.startsWith(name_ + '.') ||
+        local.startsWith(name_ + '_') || local.startsWith(name_ + '-')) {
+      if (!(isTrustedReferralDomain && hasStrongLeadSignal)) return -80;
+    }
+  }
+
+  // 5. Score by subject, snippet and sender name signals.
   let score = 0;
+
+  if (isTrustedReferralDomain && hasStrongLeadSignal) score += 35;
 
   for (const sig of LEAD_SUBJECT_SIGNALS) {
     if (subj.includes(sig) || body.includes(sig)) { score += 20; break; }
@@ -220,10 +270,6 @@ function scoreEmail(fromEmail, fromName, subject, snippet = '') {
 
   for (const sig of LEAD_SENDER_SIGNALS) {
     if (name.includes(sig)) { score += 15; break; }
-  }
-
-  for (const sig of NOISE_SUBJECT_SIGNALS) {
-    if (subj.includes(sig) || body.includes(sig)) { score -= 20; break; }
   }
 
   // Neutral (score = 0) is not a likely new lead.
