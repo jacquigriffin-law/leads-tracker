@@ -1253,10 +1253,18 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
     try {
       const { _isManualDraft: _ignored, id: _id, ...serverPayload } = lead;
       serverPayload.status = leadStatus === 'follow_up' ? 'follow_up' : 'new';
-      await postLeadToServer(serverPayload);
+      const serverLead = await postLeadToServer(serverPayload);
       await loadLeads();
       mergeManualLeadsIntoApp();
-      if (Object.keys(patch).length) setLeadState(lead.id, patch);
+      if (Object.keys(patch).length) {
+        // Use the server-generated ID (Date.now() bigint) so the state patch is
+        // stored under the same key as the actual Supabase row. The local inbox
+        // email id (lead.id) differs from the server-assigned id and would never
+        // match app.remoteLeadIds, causing the stage to silently go unsynced.
+        const stateId = serverLead?.id ?? lead.id;
+        setLeadState(stateId, patch);
+        if (serverLead?.id) void saveStateRemote(serverLead.id);
+      }
       if (stage !== 'existing_matter') app.currentTab = stage === 'new_lead' ? 'new_leads' : 'followup';
       app.heroFilter = 'all';
       updateTabUi();
