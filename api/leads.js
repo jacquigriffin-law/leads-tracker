@@ -26,7 +26,7 @@
 
 const { createHmac, timingSafeEqual } = require('crypto');
 const { verifyPinSession } = require('./lib/pin-session');
-const bundledLeadData = require('../data.json');
+const bundledLeadData = require('./lead-data.json');
 
 // ── JWT verification (HS256, identical to api/inbox.js) ───────────────────────
 function verifyJwt(token, secret) {
