@@ -7,7 +7,8 @@
 //   OPENAI_API_KEY=<key>
 //   OPENAI_MODEL (optional — default: gpt-4o-mini, a current low-cost OpenAI model)
 //
-// AUTH (POST only): Requires valid Supabase JWT + INBOX_ALLOWED_EMAILS membership.
+// AUTH (POST only): Requires the LeadFlow PIN session cookie or a valid
+// Supabase JWT + INBOX_ALLOWED_EMAILS membership.
 //
 // POST REQUEST BODY:
 //   { email_id: string, subject: string, snippet: string, source_label: string }
@@ -33,6 +34,7 @@
 'use strict';
 
 const { createHmac, timingSafeEqual } = require('crypto');
+const { verifyPinSession } = require('./lib/pin-session');
 const { buildLlmInput, validateLlmOutput } = require('./lib/email-privacy');
 
 // ── Env gate check ────────────────────────────────────────────────────────────
@@ -213,7 +215,7 @@ async function callOpenAi({ subject, snippet, source_label, model, apiKey }) {
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Vary', 'Authorization');
+  res.setHeader('Vary', 'Authorization, Cookie');
 
   // ── GET probe: returns { available: boolean } without auth requirement ───
   if (!req.method || req.method === 'GET') {
@@ -244,12 +246,13 @@ module.exports = async (req, res) => {
   }
 
   // ── Authentication ───────────────────────────────────────────────────────
+  const pinClaims = verifyPinSession(req);
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  const claims = token
+  const claims = pinClaims || (token
     ? (jwtSecret ? verifyJwt(token, jwtSecret) : await verifySupabaseTokenRemote(token))
-    : null;
+    : null);
   if (!claims) {
     audit('ai_triage.auth_failed', { ip: clientIp, jwtMode: jwtSecret ? 'local' : 'remote' });
     return res.status(401).json({ ok: false, error: 'Authentication required.' });
@@ -264,7 +267,7 @@ module.exports = async (req, res) => {
     audit('ai_triage.misconfigured', { ip: clientIp, error: 'INBOX_ALLOWED_EMAILS not configured' });
     return res.status(503).json({ ok: false, error: 'AI triage temporarily unavailable.' });
   }
-  if (!allowedEmails.includes(authedUser.toLowerCase())) {
+  if (!pinClaims && !allowedEmails.includes(authedUser.toLowerCase())) {
     audit('ai_triage.auth_denied', { ip: clientIp, user: authedUser });
     return res.status(403).json({ ok: false, error: 'Access denied.' });
   }
@@ -377,17 +380,19 @@ module.exports = async (req, res) => {
     `matter_type:${parsed.matter_type_guess}, urgency:${parsed.urgency_guess}` +
     (parsed.location_mentioned ? `, location:${parsed.location_mentioned}` : '');
 
-  void logLlmProcessing(token, {
-    p_lead_id: email_id,
-    p_source_label: source_label || null,
-    p_model_id: openaiModel,
-    p_prompt_tokens: openaiResult.prompt_tokens,
-    p_completion_tokens: openaiResult.completion_tokens,
-    p_injection_risk_detected: false,
-    p_pii_redacted: Boolean(redacted_pii),
-    p_extraction_schema_version: '1.0',
-    p_output_summary: outputSummary,
-  });
+  if (token && !pinClaims) {
+    void logLlmProcessing(token, {
+      p_lead_id: email_id,
+      p_source_label: source_label || null,
+      p_model_id: openaiModel,
+      p_prompt_tokens: openaiResult.prompt_tokens,
+      p_completion_tokens: openaiResult.completion_tokens,
+      p_injection_risk_detected: false,
+      p_pii_redacted: Boolean(redacted_pii),
+      p_extraction_schema_version: '1.0',
+      p_output_summary: outputSummary,
+    });
+  }
 
   audit('ai_triage.complete', {
     ip: clientIp,

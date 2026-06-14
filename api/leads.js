@@ -1,4 +1,4 @@
-// POST /api/leads — authenticated server-side write path for public.leads
+// GET/POST /api/leads — PIN-session protected server-side path for public.leads
 //
 // AUTH: Requires valid Supabase JWT in Authorization: Bearer <token>.
 //   Verification prefers SUPABASE_JWT_SECRET (local HS256); falls back to
@@ -25,6 +25,9 @@
 'use strict';
 
 const { createHmac, timingSafeEqual } = require('crypto');
+const fs = require('fs/promises');
+const path = require('path');
+const { verifyPinSession } = require('./lib/pin-session');
 
 // ── JWT verification (HS256, identical to api/inbox.js) ───────────────────────
 function verifyJwt(token, secret) {
@@ -211,15 +214,68 @@ async function upsertLead(record, serviceRoleKey) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
+async function fetchLeads(serviceRoleKey) {
+  const supabaseUrl = process.env.SUPABASE_URL || 'https://lviislwimdvxuuvmvzfn.supabase.co';
+  const columns = [
+    'id', 'source_account', 'date_received', 'sender_name', 'sender_email',
+    'sender_phone', 'subject', 'source_rule', 'source_platform', 'matter_type',
+    'priority', 'status', 'notes', 'draft_reply', 'raw_preview', 'reviewed_at',
+    'location', 'opposing_party', 'next_action',
+  ].join(',');
+  const url = `${supabaseUrl}/rest/v1/leads?select=${columns}&order=date_received.desc`;
+  const response = await fetch(url, {
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Supabase read failed ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return response.json();
+}
+
+async function fetchBundledLeads() {
+  const filePath = path.join(process.cwd(), 'data.json');
+  const raw = await fs.readFile(filePath, 'utf8');
+  const json = JSON.parse(raw);
+  const leads = Array.isArray(json.leads) ? json.leads : [];
+  return leads.sort((a, b) => new Date(b.date_received || 0) - new Date(a.date_received || 0));
+}
+
+async function authenticateRequest(req, jwtSecret) {
+  const pinClaims = verifyPinSession(req);
+  if (pinClaims) {
+    return {
+      claims: pinClaims,
+      user: pinClaims.email || 'pin-session',
+      mode: 'pin-session',
+    };
+  }
+
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const claims = token
+    ? (jwtSecret ? verifyJwt(token, jwtSecret) : await verifySupabaseTokenRemote(token))
+    : null;
+  if (!claims) return null;
+  return {
+    claims,
+    user: claims.email || claims.sub || 'unknown',
+    mode: jwtSecret ? 'jwt-local' : 'jwt-remote',
+  };
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Vary', 'Authorization');
+  res.setHeader('Vary', 'Authorization, Cookie');
 
-  if (req.method !== 'POST') {
+  if (!['GET', 'POST'].includes(req.method)) {
     audit('leads.method_not_allowed', { method: req.method });
-    res.setHeader('Allow', 'POST');
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed.' });
   }
 
@@ -231,38 +287,51 @@ module.exports = async (req, res) => {
     return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
   }
 
-  // ── Env gates (fail closed) ───────────────────────────────────────────────
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceRoleKey) {
-    audit('leads.misconfigured', { ip: clientIp, error: 'SUPABASE_SERVICE_ROLE_KEY not set' });
-    return res.status(503).json({ error: 'Lead write path temporarily unavailable.' });
-  }
-
-  const allowedRaw = process.env.LEADS_ALLOWED_EMAILS || process.env.INBOX_ALLOWED_EMAILS || '';
-  const allowedEmails = allowedRaw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
-  if (allowedEmails.length === 0) {
-    audit('leads.misconfigured', { ip: clientIp, error: 'LEADS_ALLOWED_EMAILS not configured' });
-    return res.status(503).json({ error: 'Lead write path temporarily unavailable.' });
-  }
-
   // ── Authentication ────────────────────────────────────────────────────────
-  const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  const claims = token
-    ? (jwtSecret ? verifyJwt(token, jwtSecret) : await verifySupabaseTokenRemote(token))
-    : null;
-  if (!claims) {
+  const auth = await authenticateRequest(req, jwtSecret);
+  if (!auth) {
     audit('leads.auth_failed', { ip: clientIp, jwtMode: jwtSecret ? 'local' : 'remote' });
     return res.status(401).json({ error: 'Authentication required.' });
   }
 
-  const authedUser = claims.email || claims.sub || 'unknown';
+  const authedUser = auth.user;
 
   // ── Authorisation ─────────────────────────────────────────────────────────
-  if (!allowedEmails.includes(authedUser.toLowerCase())) {
-    audit('leads.auth_denied', { ip: clientIp, user: authedUser });
-    return res.status(403).json({ error: 'Access denied.' });
+  if (auth.mode !== 'pin-session') {
+    const allowedRaw = process.env.LEADS_ALLOWED_EMAILS || process.env.INBOX_ALLOWED_EMAILS || '';
+    const allowedEmails = allowedRaw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    if (allowedEmails.length === 0) {
+      audit('leads.misconfigured', { ip: clientIp, error: 'LEADS_ALLOWED_EMAILS not configured' });
+      return res.status(503).json({ error: 'Lead write path temporarily unavailable.' });
+    }
+    if (!allowedEmails.includes(authedUser.toLowerCase())) {
+      audit('leads.auth_denied', { ip: clientIp, user: authedUser });
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+  }
+
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (req.method === 'GET') {
+    audit('leads.read_start', { ip: clientIp, user: authedUser, mode: auth.mode });
+    try {
+      const leads = serviceRoleKey ? await fetchLeads(serviceRoleKey) : await fetchBundledLeads();
+      audit('leads.read_ok', { ip: clientIp, user: authedUser, count: Array.isArray(leads) ? leads.length : 0 });
+      return res.status(200).json({
+        ok: true,
+        source: serviceRoleKey ? 'supabase' : 'bundled',
+        leads: Array.isArray(leads) ? leads : [],
+      });
+    } catch (err) {
+      audit('leads.read_error', { ip: clientIp, user: authedUser, error: err?.message || 'unknown' });
+      return res.status(500).json({ error: 'Failed to load leads. Please try again.' });
+    }
+  }
+
+  if (!serviceRoleKey) {
+    audit('leads.misconfigured', { ip: clientIp, error: 'SUPABASE_SERVICE_ROLE_KEY not set' });
+    return res.status(503).json({ error: 'Lead write path temporarily unavailable.' });
   }
 
   // ── Parse body ────────────────────────────────────────────────────────────

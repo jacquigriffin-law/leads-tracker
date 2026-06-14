@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<!-- LeadFlow can run as an iPhone Home Screen app. Sign in with the Supabase
-     email login link and keep the resulting session saved on this device. -->
+<!-- LeadFlow can run as an iPhone Home Screen app. Unlock with a PIN
+     and keep the resulting session saved on this device. -->
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LeadFlow"/>
@@ -513,15 +513,12 @@ button{font:inherit}
 <div class="wrap">
   <div class="auth-panel" id="authPanel" hidden>
     <div class="auth-row">
-      <input id="authEmail" type="email" placeholder="jacquigriffin@mobilesolicitor.com.au" autocomplete="email"/>
-      <button class="btn btn-primary" id="sendMagicLinkBtn">Email me a login link</button>
+      <input id="authEmail" type="password" inputmode="numeric" placeholder="Enter PIN" autocomplete="current-password"/>
+      <button class="btn btn-primary" id="sendMagicLinkBtn">Unlock</button>
       <button class="btn btn-secondary" id="signOutBtn" hidden>Sign out</button>
     </div>
-    <div class="auth-code-row" id="authCodeRow" hidden>
-      <input id="authOtp" type="text" placeholder="Paste copied Log In link" autocomplete="off"/>
-      <button class="btn btn-secondary" id="verifyOtpBtn">Use copied link</button>
-    </div>
-    <div class="muted" id="authStatus">Sign in once with the email login link or copied Log In link. LeadFlow will save the session on this device.</div>
+    <div class="auth-code-row" id="authCodeRow" hidden></div>
+    <div class="muted" id="authStatus">Enter the LeadFlow PIN once. LeadFlow will stay unlocked on this device.</div>
   </div>
 
   <div class="notice" id="notice" hidden></div>

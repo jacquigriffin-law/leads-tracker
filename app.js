@@ -1,9 +1,6 @@
 // ── Storage keys — live production (never share with demo) ──────────────────
 const LEGACY_STORAGE_KEY = 'xena-leads-state-v3';
 const STATE_STORAGE_KEY = 'xena-leads-state-v4';
-const MAGIC_LINK_COOLDOWN_KEY = 'xena-leads-magic-link-cooldown-until';
-const MAGIC_LINK_COOLDOWN_MS = 75 * 1000;
-const AUTH_EMAIL_STORAGE_KEY = 'leadflow-last-auth-email';
 const CONFIG_PATH = './config.js';
 const INBOX_IMPORTED_KEY = 'xena-leads-inbox-imported';
 const INBOX_DISMISSED_KEY = 'xena-leads-inbox-dismissed';
@@ -114,7 +111,6 @@ const app = {
   session: null,
   currentTab: 'new_leads',
   heroFilter: 'all',
-  pendingAuthEmail: '',
   leads: [],
   lastUpdated: '',
   state: {},
@@ -139,8 +135,7 @@ const app = {
   aiTriageAvailable: false,
   aiTriageDrafts: {},
   aiTriageLoading: new Set(),
-  magicLinkSending: false,
-  magicLinkCooldownTimer: null,
+  pinSigningIn: false,
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -159,41 +154,11 @@ function setSyncStatus(message) {
 }
 
 function setDefaultSyncStatus() {
-  setSyncStatus(app.supabase ? (app.session ? 'Syncing across devices' : 'Saved on this phone') : 'Saved on this phone');
+  setSyncStatus(app.session ? 'Syncing across devices' : 'PIN required');
 }
 
 function isHomeScreenApp() {
   return Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
-}
-
-function getMagicLinkCooldownRemainingMs() {
-  const cooldownUntil = Number(localStorage.getItem(MAGIC_LINK_COOLDOWN_KEY) || 0);
-  return Math.max(0, cooldownUntil - Date.now());
-}
-
-function setMagicLinkCooldown(ms = MAGIC_LINK_COOLDOWN_MS) {
-  localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(Date.now() + ms));
-}
-
-function updateMagicLinkCooldownUi() {
-  if (!els.sendMagicLinkBtn || els.sendMagicLinkBtn.hidden || app.session) return;
-  if (app.magicLinkSending) return;
-  const remainingMs = getMagicLinkCooldownRemainingMs();
-  if (remainingMs > 0) {
-    const seconds = Math.ceil(remainingMs / 1000);
-    els.sendMagicLinkBtn.disabled = true;
-    els.sendMagicLinkBtn.textContent = `Wait ${seconds}s`;
-    if (!app.magicLinkCooldownTimer) {
-      app.magicLinkCooldownTimer = window.setInterval(updateMagicLinkCooldownUi, 1000);
-    }
-    return;
-  }
-  els.sendMagicLinkBtn.disabled = false;
-  els.sendMagicLinkBtn.textContent = 'Email me a login link';
-  if (app.magicLinkCooldownTimer) {
-    window.clearInterval(app.magicLinkCooldownTimer);
-    app.magicLinkCooldownTimer = null;
-  }
 }
 
 function parseLeadDate(value) {
@@ -292,7 +257,7 @@ function clientAudit(event, details) {
 
 async function logSecurityEvent(eventType, targetId = null, metadata = {}) {
   clientAudit(eventType, { targetId, ...metadata });
-  if (!(app.supabase && app.session)) return;
+  if (!(app.supabase && app.session) || app.session.provider === 'pin') return;
   try {
     const { error } = await app.supabase.rpc('log_lead_access_event', {
       p_event_type: eventType,
@@ -719,11 +684,11 @@ function closeAddLeadModal() {
   document.body.style.overflow = '';
 }
 
-// postLeadToServer: POSTs a lead payload to /api/leads using the active Supabase
-// session token. The service role key never leaves the server. Returns the inserted
+// postLeadToServer: POSTs a lead payload to /api/leads using the PIN session
+// token. The service role key never leaves the server. Returns the inserted
 // lead row on success; throws on auth failure, server error, or network timeout.
 async function postLeadToServer(payload) {
-  if (!app.session?.access_token) throw new Error('Not authenticated');
+  if (!app.session) throw new Error('Not authenticated');
   const res = await fetchWithTimeout('/api/leads', {
     method: 'POST',
     headers: {
@@ -830,92 +795,21 @@ function isSupabaseEnabled() {
   return Boolean(cfg.enabled && cfg.url && cfg.anonKey);
 }
 
-function getAuthRedirectUrl() {
-  return `${window.location.origin}${window.location.pathname}`;
-}
-
-function hasSupabaseAuthParams() {
-  const search = new URLSearchParams(window.location.search || '');
-  const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-  return Boolean(
-    search.get('code') ||
-    search.get('error') ||
-    hash.get('access_token') ||
-    hash.get('refresh_token') ||
-    hash.get('error')
-  );
-}
-
-function cleanAuthUrl() {
-  if (!hasSupabaseAuthParams()) return;
-  window.history.replaceState({}, document.title, getAuthRedirectUrl());
-}
-
-function parseAuthInput(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return { token: '', type: 'email' };
-  try {
-    const parsed = new URL(raw);
-    const search = parsed.searchParams;
-    const hash = new URLSearchParams((parsed.hash || '').replace(/^#/, ''));
-    const nestedUrl = search.get('url');
-    if (
-      nestedUrl &&
-      !(search.get('code') || search.get('token') || search.get('token_hash') || hash.get('access_token') || hash.get('refresh_token'))
-    ) {
-      return parseAuthInput(nestedUrl);
-    }
-    const type = search.get('type') || hash.get('type') || 'email';
-    return {
-      code: search.get('code') || '',
-      tokenHash: search.get('token_hash') || hash.get('token_hash') || '',
-      accessToken: hash.get('access_token') || '',
-      refreshToken: hash.get('refresh_token') || '',
-      token: search.get('token') || hash.get('token') || '',
-      type
-    };
-  } catch {
-    return { token: raw.replace(/\s+/g, ''), type: 'email' };
-  }
-}
-
-function getAuthOtpType(type) {
-  const value = String(type || '').toLowerCase();
-  return ['signup', 'invite', 'magiclink', 'recovery', 'email_change', 'email'].includes(value)
-    ? value
-    : 'email';
-}
-
-async function consumeSupabaseAuthRedirect() {
-  if (!hasSupabaseAuthParams()) return null;
-  const search = new URLSearchParams(window.location.search || '');
-  const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-  const authError = search.get('error_description') || search.get('error') || hash.get('error_description') || hash.get('error');
-  if (authError) {
-    cleanAuthUrl();
-    throw new Error(authError);
-  }
-  const code = search.get('code');
-  if (code) {
-    const { data, error } = await app.supabase.auth.exchangeCodeForSession(code);
-    cleanAuthUrl();
-    if (error) throw error;
-    return data?.session || null;
-  }
-  const accessToken = hash.get('access_token');
-  const refreshToken = hash.get('refresh_token');
-  if (accessToken && refreshToken) {
-    const { data, error } = await app.supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken
-    });
-    cleanAuthUrl();
-    if (error) throw error;
-    return data?.session || null;
-  }
-  const { data } = await app.supabase.auth.getSession();
-  cleanAuthUrl();
-  return data?.session || null;
+async function signInWithPin(pin) {
+  const response = await fetchWithTimeout('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin })
+  }, 10000);
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(json.error || `PIN login failed (${response.status})`);
+  if (!json.token) throw new Error('PIN login did not return a session.');
+  return {
+    access_token: json.token,
+    expires_at: json.expires_at || '',
+    provider: 'pin',
+    user: json.user || { email: 'PIN session' }
+  };
 }
 
 async function initSupabase() {
@@ -925,39 +819,9 @@ async function initSupabase() {
     setDefaultSyncStatus();
     return;
   }
-  const { createClient } = await import('./vendor/supabase-js.js');
-  app.supabase = createClient(app.config.supabase.url, app.config.supabase.anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      flowType: 'implicit',
-      storageKey: 'leadflow-auth'
-    }
-  });
-  const redirectSession = await consumeSupabaseAuthRedirect();
-  const { data } = await app.supabase.auth.getSession();
-  if (redirectSession) {
-    setSyncStatus('Signed in');
-    showNotice('Signed in on this device. LeadFlow should now stay signed in here.', 'success');
-  }
-  app.session = data.session || redirectSession;
-  const lastEmail = localStorage.getItem(AUTH_EMAIL_STORAGE_KEY);
-  if (lastEmail && els.authEmail && !els.authEmail.value) els.authEmail.value = lastEmail;
+  app.supabase = { serverBacked: true };
+  app.session = readStoredPinSession();
   refreshAuthUi();
-  app.supabase.auth.onAuthStateChange((event, session) => {
-    // Only clear session on explicit sign-out; INITIAL_SESSION/TOKEN_REFRESHED can
-    // fire with null during a refresh cycle and must not wipe a valid stored session.
-    if (event === 'SIGNED_OUT') {
-      app.session = null;
-    } else if (session) {
-      app.session = session;
-    }
-    app.hasLoggedLeadRead = false;
-    app.authPanelOpen = false;
-    refreshAuthUi();
-    if (session) hydrate().catch(handleError);
-  });
 }
 
 function refreshAuthUi() {
@@ -971,31 +835,27 @@ function refreshAuthUi() {
   if (!email) app.authPanelOpen = true;
   els.showAuthBtn.textContent = email
     ? (app.authPanelOpen ? 'Hide sync settings' : 'Sync settings')
-    : (app.authPanelOpen ? 'Hide sign-in' : 'Sign in to load live leads');
+    : (app.authPanelOpen ? 'Hide PIN login' : 'Enter PIN to load LeadFlow');
   els.authPanel.hidden = !app.authPanelOpen;
 
   if (email) {
-    try { localStorage.setItem(AUTH_EMAIL_STORAGE_KEY, email); } catch {}
     els.authEmail.hidden = true;
+    els.authEmail.value = '';
     els.sendMagicLinkBtn.hidden = true;
     if (els.authCodeRow) els.authCodeRow.hidden = true;
     if (els.authOtp) els.authOtp.value = '';
-    app.pendingAuthEmail = '';
-    els.authStatus.textContent = `Signed in as ${email}`;
+    els.authStatus.textContent = 'PIN accepted. This device is signed in.';
   } else {
     els.authEmail.hidden = false;
+    els.authEmail.type = 'password';
+    els.authEmail.inputMode = 'numeric';
+    els.authEmail.placeholder = 'Enter PIN';
     els.sendMagicLinkBtn.hidden = false;
-    if (els.authCodeRow) els.authCodeRow.hidden = !app.pendingAuthEmail;
-    const isPwa = isHomeScreenApp();
-    const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
-    els.authStatus.textContent = app.pendingAuthEmail
-      ? `Check ${app.pendingAuthEmail}, then open the email login link. If that does not sign you in, copy the Log In link and paste it here.`
-      : isPwa
-        ? 'For the iPhone icon, email yourself a login link, then open it. If it does not sign you in, copy the Log In link and paste it here.'
-        : isLikelyEmbeddedBrowser
-          ? 'This looks like an in-app browser. Paste the copied Log In link here so the session saves in this browser.'
-          : 'Sign in once with the email login link or copied Log In link. LeadFlow will save the session in this browser.';
-    updateMagicLinkCooldownUi();
+    els.sendMagicLinkBtn.disabled = app.pinSigningIn;
+    els.sendMagicLinkBtn.textContent = app.pinSigningIn ? 'Unlocking...' : 'Unlock LeadFlow';
+    if (els.authCodeRow) els.authCodeRow.hidden = true;
+    if (els.authOtp) els.authOtp.value = '';
+    els.authStatus.textContent = 'Enter the LeadFlow PIN. This device will stay signed in until you sign out.';
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -1013,12 +873,13 @@ async function loadLeads() {
       app.hasLoggedLeadRead = false;
       return;
     }
-    const { data, error } = await app.supabase
-      .from('leads')
-      .select('id,source_account,date_received,sender_name,sender_email,sender_phone,subject,source_rule,source_platform,matter_type,priority,status,notes,draft_reply,raw_preview,reviewed_at,location,opposing_party,next_action')
-      .order('date_received', { ascending: false });
-    if (error) throw new Error(`Supabase leads error: ${error.message}`);
-    app.leads = data || [];
+    const response = await fetchWithTimeout(`/api/leads?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${app.session.access_token}` },
+    }, 12000);
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error || `LeadFlow data error ${response.status}`);
+    app.leads = Array.isArray(json.leads) ? json.leads : [];
     app.lastUpdated = app.leads[0]?.date_received || '';
     app.remoteLeadIds = new Set(app.leads.map((l) => Number(l.id)));
     if (!app.hasLoggedLeadRead) {
@@ -1086,8 +947,8 @@ async function probeAiTriage() {
 }
 
 async function loadInbox() {
-  // Don't poll without a valid session — pre-auth requests cause 401s that wipe inbox
-  if (!app.session?.access_token) {
+  // Don't poll without a valid PIN session — pre-auth requests cause 401s that wipe inbox
+  if (!app.session) {
     app.inboxLive = false;
     app.inboxAuthRequired = isSupabaseEnabled();
     app.inboxTransientError = false;
@@ -1102,8 +963,10 @@ async function loadInbox() {
   }
 
   try {
-    const headers = { 'Authorization': `Bearer ${app.session.access_token}` };
-    const response = await fetchWithTimeout(`/api/inbox?t=${Date.now()}`, { cache: 'no-store', headers });
+    const response = await fetchWithTimeout(`/api/inbox?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${app.session.access_token}` },
+    });
     if (response.ok) {
       const json = await response.json();
       app.inboxAuthRequired = false;
@@ -1181,7 +1044,7 @@ function startInboxPolling() {
   if (app.inboxPollTimer) clearInterval(app.inboxPollTimer);
   app.inboxPollTimer = setInterval(async () => {
     if (document.hidden) return;
-    if (!app.session?.access_token) return;
+    if (!app.session) return;
     try { await loadInbox(); } catch {}
   }, INBOX_POLL_MS);
 }
@@ -1451,7 +1314,7 @@ function toggleInboxShowDismissed() {
 // ── AI triage actions ─────────────────────────────────────────────────────────
 async function triageInboxEmail(emailId) {
   const email = app.inbox.find((e) => String(e.id) === String(emailId));
-  if (!email || !app.session?.access_token) return;
+  if (!email || !app.session) return;
 
   // Show loading state
   app.aiTriageLoading.add(String(emailId));
@@ -1518,8 +1381,15 @@ function isMissingLeadStateExtendedColumn(error) {
 // ── Supabase state sync ──────────────────────────────────────────────────────
 async function loadSupabaseState() {
   if (!(app.supabase && app.session)) return;
-  const { data, error } = await app.supabase.from('lead_states').select('*');
-  if (error) throw error;
+  const response = await fetchWithTimeout(`/api/lead-state?t=${Date.now()}`, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${app.session.access_token}` },
+  }, 12000);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `Lead state error ${response.status}`);
+  }
+  const data = (await response.json()).states || [];
   const next = {};
   for (const row of data || []) {
     next[String(row.lead_id)] = {
@@ -1545,7 +1415,6 @@ async function saveStateRemote(leadId) {
   setSyncStatus('Syncing…');
   const payload = {
     lead_id: Number(leadId),
-    user_id: app.session.user.id,
     actioned: state.actioned,
     leap: state.leap,
     no_action: state.noAction,
@@ -1556,17 +1425,18 @@ async function saveStateRemote(leadId) {
     conflict_status: state.conflictStatus || null,
     conflict_notes: state.conflictNotes || null,
   };
-  let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
-  if (error && isMissingLeadStateExtendedColumn(error)) {
-    // Migration not yet applied — retry without the extended columns.
-    delete payload.prospective_status;
-    delete payload.follow_up_date;
-    delete payload.conflict_status;
-    delete payload.conflict_notes;
-    ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
-    console.warn('LeadFlow extended migration not applied yet — saved without new fields');
+  const response = await fetchWithTimeout('/api/lead-state', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${app.session.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  }, 12000);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `Lead state sync error ${response.status}`);
   }
-  if (error) throw error;
   setSyncStatus('Synced');
 }
 
@@ -1578,34 +1448,8 @@ async function syncAllMeaningfulStateRemote() {
     return;
   }
   setSyncStatus('Syncing…');
-  let migrationWarned = false;
-  for (const [leadId, state] of entries) {
-    const payload = {
-      lead_id: Number(leadId),
-      user_id: app.session.user.id,
-      actioned: Boolean(state.actioned),
-      leap: Boolean(state.leap),
-      no_action: Boolean(state.noAction),
-      la_accepted: Boolean(state.laAccepted),
-      comment: state.comment || '',
-      prospective_status: state.prospectiveStatus || null,
-      follow_up_date: state.followUpDate || null,
-      conflict_status: state.conflictStatus || null,
-      conflict_notes: state.conflictNotes || null,
-    };
-    let { error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' });
-    if (error && isMissingLeadStateExtendedColumn(error)) {
-      if (!migrationWarned) {
-        console.warn('LeadFlow extended migration not applied yet — syncing without new fields');
-        migrationWarned = true;
-      }
-      delete payload.prospective_status;
-      delete payload.follow_up_date;
-      delete payload.conflict_status;
-      delete payload.conflict_notes;
-      ({ error } = await app.supabase.from('lead_states').upsert(payload, { onConflict: 'user_id,lead_id' }));
-    }
-    if (error) throw error;
+  for (const [leadId] of entries) {
+    await saveStateRemote(leadId);
   }
   setSyncStatus('Synced');
 }
@@ -2259,7 +2103,7 @@ function render() {
       const authRequired = isSupabaseEnabled() && !app.session;
       if (authRequired) app.authPanelOpen = true;
       const emptyMsg = authRequired
-        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Email yourself a login link, then open it. If it does not sign you in, copy the Log In link and paste it here.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with email link</button></div>`
+        ? `<div class="signin-empty"><strong>Enter PIN to load LeadFlow</strong><span>LeadFlow is protected. Enter the PIN once and this device will stay signed in.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Enter PIN</button></div>`
         : 'No leads available.';
       els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
       if (authRequired) refreshAuthUi();
@@ -3142,109 +2986,49 @@ function attachEvents() {
 
   els.sendMagicLinkBtn.addEventListener('click', async () => {
     try {
-      if (!(app.supabase && isSupabaseEnabled())) return;
-      if (app.magicLinkSending || getMagicLinkCooldownRemainingMs() > 0) {
-        updateMagicLinkCooldownUi();
-        const cooldownRemainingMs = getMagicLinkCooldownRemainingMs();
-        showNotice(`Check your email or wait ${Math.ceil(cooldownRemainingMs / 1000)} seconds before requesting another sign-in email.`, 'info');
-        return;
-      }
-      const email = els.authEmail.value.trim();
-      if (!email) throw new Error('Enter an email address first.');
-      try { localStorage.setItem(AUTH_EMAIL_STORAGE_KEY, email); } catch {}
-      setMagicLinkCooldown();
-      app.magicLinkSending = true;
+      if (!isSupabaseEnabled()) return;
+      if (app.pinSigningIn) return;
+      const pin = els.authEmail.value.trim();
+      if (!pin) throw new Error('Enter the LeadFlow PIN.');
+      app.pinSigningIn = true;
       els.sendMagicLinkBtn.disabled = true;
-      els.sendMagicLinkBtn.textContent = 'Sending...';
-      const { error } = await app.supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: getAuthRedirectUrl() }
-      });
-      if (error) throw error;
-      app.pendingAuthEmail = email;
-      if (els.authCodeRow) els.authCodeRow.hidden = false;
-      if (els.authOtp) {
-        els.authOtp.value = '';
-      }
+      els.sendMagicLinkBtn.textContent = 'Unlocking...';
+      const session = await signInWithPin(pin);
+      app.session = session;
+      els.authEmail.value = '';
       refreshAuthUi();
-      setSyncStatus('Email sent');
-      showNotice('Sign-in email sent. Open the email login link, or copy the Log In button link and paste it here.', 'info');
+      await hydrate();
+      showNotice('PIN accepted. This device will stay signed in.', 'success');
     } catch (error) {
-      const message = error?.message || '';
-      if (/rate limit/i.test(message)) {
-        setMagicLinkCooldown(90 * 1000);
-        setDefaultSyncStatus();
-        updateMagicLinkCooldownUi();
-        showNotice('Too many sign-in emails were requested. Wait about 90 seconds, then try again.', 'info');
-        return;
-      }
-      try { localStorage.removeItem(MAGIC_LINK_COOLDOWN_KEY); } catch {}
       handleError(error);
     } finally {
-      app.magicLinkSending = false;
-      updateMagicLinkCooldownUi();
+      app.pinSigningIn = false;
+      refreshAuthUi();
     }
   });
 
   els.verifyOtpBtn?.addEventListener('click', async () => {
-    const originalLabel = els.verifyOtpBtn.textContent;
-    try {
-      if (!(app.supabase && isSupabaseEnabled())) return;
-      const email = (app.pendingAuthEmail || els.authEmail.value || '').trim();
-      const authInput = parseAuthInput(els.authOtp?.value || '');
-      if (!(authInput.token || authInput.tokenHash || authInput.code || (authInput.accessToken && authInput.refreshToken))) {
-        throw new Error('Paste the copied Log In link from your email.');
-      }
-      els.verifyOtpBtn.disabled = true;
-      els.verifyOtpBtn.textContent = 'Verifying…';
-      let data;
-      let error;
-      if (authInput.accessToken && authInput.refreshToken) {
-        ({ data, error } = await app.supabase.auth.setSession({
-          access_token: authInput.accessToken,
-          refresh_token: authInput.refreshToken
-        }));
-      } else if (authInput.code) {
-        ({ data, error } = await app.supabase.auth.exchangeCodeForSession(authInput.code));
-      } else if (authInput.tokenHash) {
-        ({ data, error } = await app.supabase.auth.verifyOtp({ token_hash: authInput.tokenHash, type: getAuthOtpType(authInput.type) }));
-      } else {
-        if (!email) throw new Error('Enter your email address first.');
-        ({ data, error } = await app.supabase.auth.verifyOtp({ email, token: authInput.token, type: getAuthOtpType(authInput.type) }));
-      }
-      if (error) throw error;
-      if (data?.session) app.session = data.session;
-      app.pendingAuthEmail = '';
-      if (els.authOtp) els.authOtp.value = '';
-      setSyncStatus('Signed in');
-      refreshAuthUi();
-      await hydrate();
-      showNotice('Signed in on this device. LeadFlow should now stay signed in here.', 'success');
-    } catch (error) {
-      handleError(error);
-    } finally {
-      els.verifyOtpBtn.disabled = false;
-      els.verifyOtpBtn.textContent = originalLabel;
-    }
+    els.sendMagicLinkBtn?.click();
   });
 
   els.installHelpBtn?.addEventListener('click', () => {
     const message = isHomeScreenApp()
-      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, email yourself a login link, then open it or paste the copied Log In link here.'
-      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once with the email login link or copied Log In link.';
+      ? 'You are already using the iPhone Home Screen version. If it asks again, enter the LeadFlow PIN once.'
+      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon and enter the PIN once.';
     showNotice(message, 'info');
   });
 
-  els.authOtp?.addEventListener('keydown', (event) => {
+  els.authEmail?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      els.verifyOtpBtn?.click();
+      els.sendMagicLinkBtn?.click();
     }
   });
 
   els.signOutBtn.addEventListener('click', async () => {
     try {
-      await app.supabase.auth.signOut();
+      await fetch('/api/auth', { method: 'DELETE', credentials: 'same-origin' });
+      clearPinSession();
       app.session = null;
       app.hasLoggedLeadRead = false;
       app.authPanelOpen = false;
@@ -3263,7 +3047,7 @@ function handleError(error) {
   const message = error?.message || 'Something went wrong.';
   if (/rate limit/i.test(message)) {
     setDefaultSyncStatus();
-    showNotice('Too many sign-in emails were requested. Wait about a minute, then try again in the same browser, ideally Safari on iPhone.', 'info');
+    showNotice('Too many PIN attempts. Wait about a minute, then try again.', 'info');
     return;
   }
   setSyncStatus(app.supabase && app.session ? 'Sync issue' : 'Saved on this phone');

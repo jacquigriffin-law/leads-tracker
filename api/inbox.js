@@ -6,10 +6,8 @@
 // Returns { configured, inbox_accounts, emails } — each email is reduced to the
 // minimum triage/import fields needed by the UI, not full message content.
 //
-// AUTH: Requires a valid Supabase session access token in the Authorization header.
-//   Authorization: Bearer <supabase-access-token>
-// Verification prefers SUPABASE_JWT_SECRET when configured, but can also verify
-// tokens by calling Supabase Auth directly using the public publishable key.
+// AUTH: Requires either the LeadFlow PIN session cookie or a valid Supabase
+// session access token in the Authorization header.
 // INBOX_ALLOWED_EMAILS must be set to a comma-separated list of permitted addresses.
 // Missing authorisation config fails closed.
 
@@ -18,6 +16,7 @@ const { simpleParser } = require('mailparser');
 const { createHmac, timingSafeEqual } = require('crypto');
 const { minimiseBody, redactPii, detectInjection } = require('./lib/email-privacy');
 const { isLikelyNewLead } = require('./lib/lead-filter');
+const { verifyPinSession } = require('./lib/pin-session');
 
 const ImapFlowRef = { current: ImapFlow };
 const simpleParserRef = { current: simpleParser };
@@ -312,7 +311,7 @@ async function fetchIMAP({ host, port, user, pass, label, mailboxKey, cutoffDate
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Vary', 'Authorization');
+  res.setHeader('Vary', 'Authorization, Cookie');
 
   if (req.method && req.method !== 'GET') {
     audit('inbox.method_not_allowed', { method: req.method });
@@ -334,12 +333,13 @@ module.exports = async (req, res) => {
   // Prefer local JWT verification when SUPABASE_JWT_SECRET is configured. If the
   // project uses Supabase's newer API key screen and the JWT secret is not
   // readily available, fall back to Supabase Auth's /user verification endpoint.
+  const pinClaims = verifyPinSession(req);
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  const claims = token
+  const claims = pinClaims || (token
     ? (jwtSecret ? verifyJwt(token, jwtSecret) : await verifySupabaseTokenRemote(token))
-    : null;
+    : null);
   if (!claims) {
     audit('inbox.auth_failed', { ip: clientIp, jwtMode: jwtSecret ? 'local' : 'remote' });
     return res.status(401).json({ error: 'Authentication required.' });
@@ -359,7 +359,7 @@ module.exports = async (req, res) => {
     audit('inbox.misconfigured', { ip: clientIp, error: 'INBOX_ALLOWED_EMAILS not configured' });
     return res.status(503).json({ error: 'Inbox temporarily unavailable.' });
   }
-  if (!allowedEmails.includes(authedUser.toLowerCase())) {
+  if (!pinClaims && !allowedEmails.includes(authedUser.toLowerCase())) {
     audit('inbox.auth_denied', { ip: clientIp, user: authedUser });
     return res.status(403).json({ error: 'Access denied.' });
   }
