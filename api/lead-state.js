@@ -4,7 +4,6 @@ const { verifyPinSession } = require('./lib/pin-session');
 
 const STATE_FIELDS = [
   'lead_id', 'user_id', 'actioned', 'leap', 'no_action', 'la_accepted', 'comment',
-  'prospective_status', 'follow_up_date', 'conflict_status', 'conflict_notes',
 ];
 
 function audit(event, details) {
@@ -96,10 +95,6 @@ async function saveState(body) {
     no_action: sanitiseBool(body.no_action),
     la_accepted: sanitiseBool(body.la_accepted),
     comment: sanitiseText(body.comment, 10000) || '',
-    prospective_status: sanitiseText(body.prospective_status, 80),
-    follow_up_date: sanitiseDate(body.follow_up_date),
-    conflict_status: sanitiseText(body.conflict_status, 80),
-    conflict_notes: sanitiseText(body.conflict_notes, 10000),
   };
 
   const response = await supabaseFetch('lead_states?on_conflict=user_id,lead_id', {
