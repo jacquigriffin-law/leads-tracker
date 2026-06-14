@@ -2243,7 +2243,7 @@ function render() {
       const authRequired = isSupabaseEnabled() && !app.session;
       if (authRequired) app.authPanelOpen = true;
       const emptyMsg = authRequired
-        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Use the iPhone icon or Safari, email yourself a login link, then tap Log In in the email.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with email link</button></div>`
+        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Email yourself a sign-in code, then enter the code here. If the email only has a Log In button, copy that link and paste it here.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with email code</button></div>`
         : 'No leads available.';
       els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
       if (authRequired) refreshAuthUi();
@@ -3159,7 +3159,7 @@ function attachEvents() {
         setMagicLinkCooldown(90 * 1000);
         setDefaultSyncStatus();
         updateMagicLinkCooldownUi();
-        showNotice('Too many login links were requested. Wait about 90 seconds, then try again.', 'info');
+        showNotice('Too many sign-in emails were requested. Wait about 90 seconds, then try again.', 'info');
         return;
       }
       try { localStorage.removeItem(MAGIC_LINK_COOLDOWN_KEY); } catch {}
