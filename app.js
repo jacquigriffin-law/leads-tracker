@@ -189,7 +189,7 @@ function updateMagicLinkCooldownUi() {
     return;
   }
   els.sendMagicLinkBtn.disabled = false;
-  els.sendMagicLinkBtn.textContent = 'Email me a login link';
+  els.sendMagicLinkBtn.textContent = 'Email me a sign-in code';
   if (app.magicLinkCooldownTimer) {
     window.clearInterval(app.magicLinkCooldownTimer);
     app.magicLinkCooldownTimer = null;
@@ -851,6 +851,25 @@ function cleanAuthUrl() {
   window.history.replaceState({}, document.title, getAuthRedirectUrl());
 }
 
+function parseAuthInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return { token: '' };
+  try {
+    const parsed = new URL(raw);
+    const search = parsed.searchParams;
+    const hash = new URLSearchParams((parsed.hash || '').replace(/^#/, ''));
+    return {
+      code: search.get('code') || '',
+      tokenHash: search.get('token_hash') || hash.get('token_hash') || '',
+      accessToken: hash.get('access_token') || '',
+      refreshToken: hash.get('refresh_token') || '',
+      token: ''
+    };
+  } catch {
+    return { token: raw.replace(/\s+/g, '') };
+  }
+}
+
 async function consumeSupabaseAuthRedirect() {
   if (!hasSupabaseAuthParams()) return null;
   const search = new URLSearchParams(window.location.search || '');
@@ -954,12 +973,12 @@ function refreshAuthUi() {
     const isPwa = isHomeScreenApp();
     const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
     els.authStatus.textContent = app.pendingAuthEmail
-      ? `Check ${app.pendingAuthEmail} and tap the Log In link. When LeadFlow reopens, it will save the session on this device.`
+      ? `Check ${app.pendingAuthEmail}, then enter the code here. If the email only has a Log In button, copy that link and paste it into the same box.`
       : isPwa
-        ? 'For the iPhone icon, email yourself a login link and tap Log In. If it opens Safari instead of the icon, use Safari for LeadFlow until the saved session appears.'
+        ? 'For the iPhone icon, email yourself a sign-in code, then enter it here. If the email only has a Log In button, copy that link and paste it here.'
         : isLikelyEmbeddedBrowser
-          ? 'This looks like an in-app browser. For the most reliable saved login, open LeadFlow in Safari, then use the email login link.'
-          : 'Sign in once with the email login link. LeadFlow will save the session in this browser.';
+          ? 'This looks like an in-app browser. Enter the email code here, or paste the copied login link here, so the session saves in this browser.'
+          : 'Sign in once with the email code or copied login link. LeadFlow will save the session in this browser.';
     updateMagicLinkCooldownUi();
   }
   els.signOutBtn.hidden = !email;
@@ -3111,7 +3130,7 @@ function attachEvents() {
       if (app.magicLinkSending || getMagicLinkCooldownRemainingMs() > 0) {
         updateMagicLinkCooldownUi();
         const cooldownRemainingMs = getMagicLinkCooldownRemainingMs();
-        showNotice(`Check your email or wait ${Math.ceil(cooldownRemainingMs / 1000)} seconds before requesting another login link.`, 'info');
+        showNotice(`Check your email or wait ${Math.ceil(cooldownRemainingMs / 1000)} seconds before requesting another sign-in email.`, 'info');
         return;
       }
       const email = els.authEmail.value.trim();
@@ -3133,7 +3152,7 @@ function attachEvents() {
       }
       refreshAuthUi();
       setSyncStatus('Email sent');
-      showNotice('Login link sent. Open the email and tap Log In to sign in on this device.', 'info');
+      showNotice('Sign-in email sent. Enter the code here, or copy the Log In button link and paste it into the code box.', 'info');
     } catch (error) {
       const message = error?.message || '';
       if (/rate limit/i.test(message)) {
@@ -3156,12 +3175,27 @@ function attachEvents() {
     try {
       if (!(app.supabase && isSupabaseEnabled())) return;
       const email = (app.pendingAuthEmail || els.authEmail.value || '').trim();
-      const token = (els.authOtp?.value || '').replace(/\s+/g, '').trim();
-      if (!email) throw new Error('Enter your email address first.');
-      if (!token) throw new Error('Enter the code from your email.');
+      const authInput = parseAuthInput(els.authOtp?.value || '');
+      if (!(authInput.token || authInput.tokenHash || authInput.code || (authInput.accessToken && authInput.refreshToken))) {
+        throw new Error('Enter the code from your email, or paste the copied Log In link.');
+      }
       els.verifyOtpBtn.disabled = true;
       els.verifyOtpBtn.textContent = 'Verifying…';
-      const { data, error } = await app.supabase.auth.verifyOtp({ email, token, type: 'email' });
+      let data;
+      let error;
+      if (authInput.accessToken && authInput.refreshToken) {
+        ({ data, error } = await app.supabase.auth.setSession({
+          access_token: authInput.accessToken,
+          refresh_token: authInput.refreshToken
+        }));
+      } else if (authInput.code) {
+        ({ data, error } = await app.supabase.auth.exchangeCodeForSession(authInput.code));
+      } else if (authInput.tokenHash) {
+        ({ data, error } = await app.supabase.auth.verifyOtp({ token_hash: authInput.tokenHash, type: 'email' }));
+      } else {
+        if (!email) throw new Error('Enter your email address first.');
+        ({ data, error } = await app.supabase.auth.verifyOtp({ email, token: authInput.token, type: 'email' }));
+      }
       if (error) throw error;
       if (data?.session) app.session = data.session;
       app.pendingAuthEmail = '';
@@ -3180,8 +3214,8 @@ function attachEvents() {
 
   els.installHelpBtn?.addEventListener('click', () => {
     const message = isHomeScreenApp()
-      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, email yourself a login link and tap Log In.'
-      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once with the email login link.';
+      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, email yourself a sign-in code and enter it here, or paste the copied login link.'
+      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once with the email code or copied login link.';
     showNotice(message, 'info');
   });
 
