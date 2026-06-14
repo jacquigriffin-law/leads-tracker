@@ -7,6 +7,7 @@ const INBOX_DISMISSED_KEY = 'xena-leads-inbox-dismissed';
 const INBOX_SHOW_DISMISSED_KEY = 'xena-leads-inbox-show-dismissed';
 const PENDING_HERO_FILTER_KEY = 'xena-leads-pending-hero-filter';
 const MANUAL_LEADS_KEY = 'xena-leads-manual-drafts-v1';
+const PIN_SESSION_KEY = 'leadflow-pin-session-v1';
 const DEFAULT_CONFIG = {
   supabase: {
     enabled: true,
@@ -795,6 +796,45 @@ function isSupabaseEnabled() {
   return Boolean(cfg.enabled && cfg.url && cfg.anonKey);
 }
 
+function readStoredPinSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem(PIN_SESSION_KEY) || 'null');
+    if (!session?.access_token) return null;
+    const expiresAt = session.expires_at ? new Date(session.expires_at).getTime() : 0;
+    if (expiresAt && expiresAt <= Date.now()) {
+      localStorage.removeItem(PIN_SESSION_KEY);
+      return null;
+    }
+    return {
+      access_token: session.access_token,
+      expires_at: session.expires_at || '',
+      provider: 'pin',
+      user: session.user || { email: 'PIN session' }
+    };
+  } catch {
+    try { localStorage.removeItem(PIN_SESSION_KEY); } catch {}
+    return null;
+  }
+}
+
+function storePinSession(session) {
+  try {
+    localStorage.setItem(PIN_SESSION_KEY, JSON.stringify({
+      access_token: session.access_token,
+      expires_at: session.expires_at || '',
+      user: session.user || { email: 'PIN session' },
+      provider: 'pin'
+    }));
+  } catch {
+    // Safari private browsing or storage pressure can block localStorage.
+    // The server cookie still exists, but LeadFlow needs this token for API headers.
+  }
+}
+
+function clearPinSession() {
+  try { localStorage.removeItem(PIN_SESSION_KEY); } catch {}
+}
+
 async function signInWithPin(pin) {
   const response = await fetchWithTimeout('/api/auth', {
     method: 'POST',
@@ -804,12 +844,14 @@ async function signInWithPin(pin) {
   const json = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(json.error || `PIN login failed (${response.status})`);
   if (!json.token) throw new Error('PIN login did not return a session.');
-  return {
+  const session = {
     access_token: json.token,
     expires_at: json.expires_at || '',
     provider: 'pin',
     user: json.user || { email: 'PIN session' }
   };
+  storePinSession(session);
+  return session;
 }
 
 async function initSupabase() {
