@@ -517,6 +517,10 @@ button{font:inherit}
       <button class="btn btn-primary" id="sendMagicLinkBtn">Email me a login link</button>
       <button class="btn btn-secondary" id="signOutBtn" hidden>Sign out</button>
     </div>
+    <div class="auth-code-row" id="authCodeRow" hidden>
+      <input id="authOtp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="6 digit code" autocomplete="one-time-code"/>
+      <button class="btn btn-secondary" id="verifyOtpBtn">Use code instead</button>
+    </div>
     <div class="muted" id="authStatus">Sign in once with the email login link. LeadFlow will save the session on this device after the link opens.</div>
   </div>
 

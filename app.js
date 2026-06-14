@@ -896,6 +896,7 @@ async function initSupabase() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      flowType: 'implicit',
       storageKey: 'leadflow-auth'
     }
   });
@@ -949,7 +950,7 @@ function refreshAuthUi() {
   } else {
     els.authEmail.hidden = false;
     els.sendMagicLinkBtn.hidden = false;
-    if (els.authCodeRow) els.authCodeRow.hidden = true;
+    if (els.authCodeRow) els.authCodeRow.hidden = !app.pendingAuthEmail;
     const isPwa = isHomeScreenApp();
     const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
     els.authStatus.textContent = app.pendingAuthEmail
@@ -3126,7 +3127,7 @@ function attachEvents() {
       });
       if (error) throw error;
       app.pendingAuthEmail = email;
-      if (els.authCodeRow) els.authCodeRow.hidden = true;
+      if (els.authCodeRow) els.authCodeRow.hidden = false;
       if (els.authOtp) {
         els.authOtp.value = '';
       }
