@@ -807,6 +807,59 @@ function isSupabaseEnabled() {
   return Boolean(cfg.enabled && cfg.url && cfg.anonKey);
 }
 
+function getAuthRedirectUrl() {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function hasSupabaseAuthParams() {
+  const search = new URLSearchParams(window.location.search || '');
+  const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+  return Boolean(
+    search.get('code') ||
+    search.get('error') ||
+    hash.get('access_token') ||
+    hash.get('refresh_token') ||
+    hash.get('error')
+  );
+}
+
+function cleanAuthUrl() {
+  if (!hasSupabaseAuthParams()) return;
+  window.history.replaceState({}, document.title, getAuthRedirectUrl());
+}
+
+async function consumeSupabaseAuthRedirect() {
+  if (!hasSupabaseAuthParams()) return null;
+  const search = new URLSearchParams(window.location.search || '');
+  const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+  const authError = search.get('error_description') || search.get('error') || hash.get('error_description') || hash.get('error');
+  if (authError) {
+    cleanAuthUrl();
+    throw new Error(authError);
+  }
+  const code = search.get('code');
+  if (code) {
+    const { data, error } = await app.supabase.auth.exchangeCodeForSession(code);
+    cleanAuthUrl();
+    if (error) throw error;
+    return data?.session || null;
+  }
+  const accessToken = hash.get('access_token');
+  const refreshToken = hash.get('refresh_token');
+  if (accessToken && refreshToken) {
+    const { data, error } = await app.supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken
+    });
+    cleanAuthUrl();
+    if (error) throw error;
+    return data?.session || null;
+  }
+  const { data } = await app.supabase.auth.getSession();
+  cleanAuthUrl();
+  return data?.session || null;
+}
+
 async function initSupabase() {
   if (!isSupabaseEnabled()) {
     els.authPanel.hidden = true;
@@ -823,8 +876,13 @@ async function initSupabase() {
       storageKey: 'leadflow-auth'
     }
   });
+  const redirectSession = await consumeSupabaseAuthRedirect();
   const { data } = await app.supabase.auth.getSession();
-  app.session = data.session;
+  if (redirectSession) {
+    setSyncStatus('Signed in');
+    showNotice('Signed in on this device. LeadFlow should now stay signed in here.', 'success');
+  }
+  app.session = data.session || redirectSession;
   const lastEmail = localStorage.getItem(AUTH_EMAIL_STORAGE_KEY);
   if (lastEmail && els.authEmail && !els.authEmail.value) els.authEmail.value = lastEmail;
   refreshAuthUi();
@@ -868,16 +926,16 @@ function refreshAuthUi() {
   } else {
     els.authEmail.hidden = false;
     els.sendMagicLinkBtn.hidden = false;
-    if (els.authCodeRow) els.authCodeRow.hidden = !app.pendingAuthEmail;
+    if (els.authCodeRow) els.authCodeRow.hidden = true;
     const isPwa = isHomeScreenApp();
     const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
     els.authStatus.textContent = app.pendingAuthEmail
-      ? `Check ${app.pendingAuthEmail} for the 6 digit code, then type it here. Do not tap the email magic link. Typing the code signs in this exact ${isPwa ? 'Home Screen app' : isLikelyEmbeddedBrowser ? 'in-app browser' : 'browser'} so it should stop asking repeatedly.`
+      ? `Check ${app.pendingAuthEmail} and tap the Log In link. When LeadFlow reopens, it will save the session on this device.`
       : isPwa
-        ? 'For the iPhone icon, email yourself a code and type the code here once. Do not tap the magic link in the email — that can open a different browser and leave this app signed out.'
+        ? 'For the iPhone icon, email yourself a login link and tap Log In. If it opens Safari instead of the icon, use Safari for LeadFlow until the saved session appears.'
         : isLikelyEmbeddedBrowser
-          ? 'This looks like an in-app browser. For the most reliable saved login, open LeadFlow in Safari or from the iPhone icon, then type the email code into that same screen.'
-          : 'Sign in once with a code. On iPhone, type the email code into this same LeadFlow screen and avoid tapping the magic link.';
+          ? 'This looks like an in-app browser. For the most reliable saved login, open LeadFlow in Safari, then use the email login link.'
+          : 'Sign in once with the email login link. LeadFlow will save the session in this browser.';
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -2141,7 +2199,7 @@ function render() {
       const authRequired = isSupabaseEnabled() && !app.session;
       if (authRequired) app.authPanelOpen = true;
       const emptyMsg = authRequired
-        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Use the iPhone icon or Safari, email yourself a code, then type the code into this same screen. Do not tap the magic link.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with code</button></div>`
+        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Use the iPhone icon or Safari, email yourself a login link, then tap Log In in the email.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with email link</button></div>`
         : 'No leads available.';
       els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
       if (authRequired) refreshAuthUi();
@@ -3032,32 +3090,31 @@ function attachEvents() {
       const cooldownRemainingMs = getMagicLinkCooldownRemainingMs();
       if (cooldownRemainingMs > 0) {
         setDefaultSyncStatus();
-        showNotice(`Check your email or wait ${Math.ceil(cooldownRemainingMs / 1000)} seconds before requesting another code.`, 'info');
+        showNotice(`Check your email or wait ${Math.ceil(cooldownRemainingMs / 1000)} seconds before requesting another login link.`, 'info');
         return;
       }
       els.sendMagicLinkBtn.disabled = true;
       els.sendMagicLinkBtn.textContent = 'Sending…';
       const { error } = await app.supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` }
+        options: { emailRedirectTo: getAuthRedirectUrl() }
       });
       if (error) throw error;
       app.pendingAuthEmail = email;
-      if (els.authCodeRow) els.authCodeRow.hidden = false;
+      if (els.authCodeRow) els.authCodeRow.hidden = true;
       if (els.authOtp) {
         els.authOtp.value = '';
-        setTimeout(() => els.authOtp?.focus(), 100);
       }
       refreshAuthUi();
       setMagicLinkCooldown();
       setSyncStatus('Email sent');
-      showNotice('Code sent. On iPhone, type the 6 digit code into this same LeadFlow screen. Do not tap the magic link in the email.', 'info');
+      showNotice('Login link sent. Open the email and tap Log In to sign in on this device.', 'info');
     } catch (error) {
       const message = error?.message || '';
       if (/rate limit/i.test(message)) {
         setMagicLinkCooldown();
         setDefaultSyncStatus();
-        showNotice('Too many codes were requested. Wait about a minute, then try again in the same LeadFlow screen.', 'info');
+        showNotice('Too many login links were requested. Wait about a minute, then try again.', 'info');
         return;
       }
       handleError(error);
@@ -3096,8 +3153,8 @@ function attachEvents() {
 
   els.installHelpBtn?.addEventListener('click', () => {
     const message = isHomeScreenApp()
-      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, send a code and type the code into this same app screen once.'
-      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once inside that icon by typing the email code into the app — do not tap the magic link.';
+      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, email yourself a login link and tap Log In.'
+      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once with the email login link.';
     showNotice(message, 'info');
   });
 

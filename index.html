@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<!-- LeadFlow can run as an iPhone Home Screen app. Sign in by typing the email
-     code into the app screen so the session is saved in this exact context. -->
+<!-- LeadFlow can run as an iPhone Home Screen app. Sign in with the Supabase
+     email link and keep the resulting session saved on this device. -->
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LeadFlow"/>
@@ -514,14 +514,10 @@ button{font:inherit}
   <div class="auth-panel" id="authPanel" hidden>
     <div class="auth-row">
       <input id="authEmail" type="email" placeholder="jacquigriffin@mobilesolicitor.com.au" autocomplete="email"/>
-      <button class="btn btn-primary" id="sendMagicLinkBtn">Email me a code</button>
+      <button class="btn btn-primary" id="sendMagicLinkBtn">Email me a login link</button>
       <button class="btn btn-secondary" id="signOutBtn" hidden>Sign out</button>
     </div>
-    <div class="auth-code-row" id="authCodeRow" hidden>
-      <input id="authOtp" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6 digit code" autocomplete="one-time-code"/>
-      <button class="btn btn-secondary" id="verifyOtpBtn">Verify code</button>
-    </div>
-    <div class="muted" id="authStatus">Sign in once with a code. On iPhone, do not tap the email magic link — type the code into this same LeadFlow screen so the saved login stays on this device.</div>
+    <div class="muted" id="authStatus">Sign in once with the email login link. LeadFlow will save the session on this device after the link opens.</div>
   </div>
 
   <div class="notice" id="notice" hidden></div>
