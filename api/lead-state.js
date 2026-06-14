@@ -2,6 +2,8 @@
 
 const { verifyPinSession } = require('./lib/pin-session');
 
+// Keep this to base-schema columns. Optional state migrations may not be present
+// in production, so selecting or writing them unconditionally can 500 the API.
 const STATE_FIELDS = [
   'lead_id', 'user_id', 'actioned', 'leap', 'no_action', 'la_accepted', 'comment',
 ];
@@ -162,4 +164,4 @@ module.exports = async (req, res) => {
   }
 };
 
-module.exports._test = { sanitiseDate, sanitiseText, sanitiseBool };
+module.exports._test = { STATE_FIELDS, sanitiseDate, sanitiseText, sanitiseBool, loadStates, saveState };
