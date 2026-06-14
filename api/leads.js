@@ -25,9 +25,8 @@
 'use strict';
 
 const { createHmac, timingSafeEqual } = require('crypto');
-const fs = require('fs/promises');
-const path = require('path');
 const { verifyPinSession } = require('./lib/pin-session');
+const bundledLeadData = require('../data.json');
 
 // ── JWT verification (HS256, identical to api/inbox.js) ───────────────────────
 function verifyJwt(token, secret) {
@@ -237,10 +236,7 @@ async function fetchLeads(serviceRoleKey) {
 }
 
 async function fetchBundledLeads() {
-  const filePath = path.join(process.cwd(), 'data.json');
-  const raw = await fs.readFile(filePath, 'utf8');
-  const json = JSON.parse(raw);
-  const leads = Array.isArray(json.leads) ? json.leads : [];
+  const leads = Array.isArray(bundledLeadData.leads) ? bundledLeadData.leads : [];
   return leads.sort((a, b) => new Date(b.date_received || 0) - new Date(a.date_received || 0));
 }
 
