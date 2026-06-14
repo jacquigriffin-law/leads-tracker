@@ -149,6 +149,14 @@ module.exports = async (req, res) => {
     }
 
     const body = typeof req.body === 'object' && req.body !== null ? req.body : JSON.parse(req.body || '{}');
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      audit('lead_state.write_fallback_local_only', {
+        ip,
+        user: claims.email || 'pin-session',
+        lead_id: body?.lead_id || null,
+      });
+      return res.status(200).json({ ok: true, state: null, source: 'local-only' });
+    }
     const state = await saveState(body);
     audit('lead_state.write_ok', { ip, user: claims.email || 'pin-session', lead_id: state?.lead_id });
     return res.status(200).json({ ok: true, state });
