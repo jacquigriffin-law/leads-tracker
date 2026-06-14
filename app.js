@@ -189,7 +189,7 @@ function updateMagicLinkCooldownUi() {
     return;
   }
   els.sendMagicLinkBtn.disabled = false;
-  els.sendMagicLinkBtn.textContent = 'Email me a sign-in code';
+  els.sendMagicLinkBtn.textContent = 'Email me a login link';
   if (app.magicLinkCooldownTimer) {
     window.clearInterval(app.magicLinkCooldownTimer);
     app.magicLinkCooldownTimer = null;
@@ -853,21 +853,37 @@ function cleanAuthUrl() {
 
 function parseAuthInput(value) {
   const raw = String(value || '').trim();
-  if (!raw) return { token: '' };
+  if (!raw) return { token: '', type: 'email' };
   try {
     const parsed = new URL(raw);
     const search = parsed.searchParams;
     const hash = new URLSearchParams((parsed.hash || '').replace(/^#/, ''));
+    const nestedUrl = search.get('url');
+    if (
+      nestedUrl &&
+      !(search.get('code') || search.get('token') || search.get('token_hash') || hash.get('access_token') || hash.get('refresh_token'))
+    ) {
+      return parseAuthInput(nestedUrl);
+    }
+    const type = search.get('type') || hash.get('type') || 'email';
     return {
       code: search.get('code') || '',
       tokenHash: search.get('token_hash') || hash.get('token_hash') || '',
       accessToken: hash.get('access_token') || '',
       refreshToken: hash.get('refresh_token') || '',
-      token: ''
+      token: search.get('token') || hash.get('token') || '',
+      type
     };
   } catch {
-    return { token: raw.replace(/\s+/g, '') };
+    return { token: raw.replace(/\s+/g, ''), type: 'email' };
   }
+}
+
+function getAuthOtpType(type) {
+  const value = String(type || '').toLowerCase();
+  return ['signup', 'invite', 'magiclink', 'recovery', 'email_change', 'email'].includes(value)
+    ? value
+    : 'email';
 }
 
 async function consumeSupabaseAuthRedirect() {
@@ -973,12 +989,12 @@ function refreshAuthUi() {
     const isPwa = isHomeScreenApp();
     const isLikelyEmbeddedBrowser = /FBAN|FBAV|Instagram|Line|LinkedIn|Twitter|Telegram|MicroMessenger/i.test(navigator.userAgent || '');
     els.authStatus.textContent = app.pendingAuthEmail
-      ? `Check ${app.pendingAuthEmail}, then enter the code here. If the email only has a Log In button, copy that link and paste it into the same box.`
+      ? `Check ${app.pendingAuthEmail}, then open the email login link. If that does not sign you in, copy the Log In link and paste it here.`
       : isPwa
-        ? 'For the iPhone icon, email yourself a sign-in code, then enter it here. If the email only has a Log In button, copy that link and paste it here.'
+        ? 'For the iPhone icon, email yourself a login link, then open it. If it does not sign you in, copy the Log In link and paste it here.'
         : isLikelyEmbeddedBrowser
-          ? 'This looks like an in-app browser. Enter the email code here, or paste the copied login link here, so the session saves in this browser.'
-          : 'Sign in once with the email code or copied login link. LeadFlow will save the session in this browser.';
+          ? 'This looks like an in-app browser. Paste the copied Log In link here so the session saves in this browser.'
+          : 'Sign in once with the email login link or copied Log In link. LeadFlow will save the session in this browser.';
     updateMagicLinkCooldownUi();
   }
   els.signOutBtn.hidden = !email;
@@ -2243,7 +2259,7 @@ function render() {
       const authRequired = isSupabaseEnabled() && !app.session;
       if (authRequired) app.authPanelOpen = true;
       const emptyMsg = authRequired
-        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Email yourself a sign-in code, then enter the code here. If the email only has a Log In button, copy that link and paste it here.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with email code</button></div>`
+        ? `<div class="signin-empty"><strong>Sign in once to load live leads</strong><span>LeadFlow is protected. Email yourself a login link, then open it. If it does not sign you in, copy the Log In link and paste it here.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Sign in with email link</button></div>`
         : 'No leads available.';
       els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
       if (authRequired) refreshAuthUi();
@@ -3152,7 +3168,7 @@ function attachEvents() {
       }
       refreshAuthUi();
       setSyncStatus('Email sent');
-      showNotice('Sign-in email sent. Enter the code here, or copy the Log In button link and paste it into the code box.', 'info');
+      showNotice('Sign-in email sent. Open the email login link, or copy the Log In button link and paste it here.', 'info');
     } catch (error) {
       const message = error?.message || '';
       if (/rate limit/i.test(message)) {
@@ -3177,7 +3193,7 @@ function attachEvents() {
       const email = (app.pendingAuthEmail || els.authEmail.value || '').trim();
       const authInput = parseAuthInput(els.authOtp?.value || '');
       if (!(authInput.token || authInput.tokenHash || authInput.code || (authInput.accessToken && authInput.refreshToken))) {
-        throw new Error('Enter the code from your email, or paste the copied Log In link.');
+        throw new Error('Paste the copied Log In link from your email.');
       }
       els.verifyOtpBtn.disabled = true;
       els.verifyOtpBtn.textContent = 'Verifying…';
@@ -3191,10 +3207,10 @@ function attachEvents() {
       } else if (authInput.code) {
         ({ data, error } = await app.supabase.auth.exchangeCodeForSession(authInput.code));
       } else if (authInput.tokenHash) {
-        ({ data, error } = await app.supabase.auth.verifyOtp({ token_hash: authInput.tokenHash, type: 'email' }));
+        ({ data, error } = await app.supabase.auth.verifyOtp({ token_hash: authInput.tokenHash, type: getAuthOtpType(authInput.type) }));
       } else {
         if (!email) throw new Error('Enter your email address first.');
-        ({ data, error } = await app.supabase.auth.verifyOtp({ email, token: authInput.token, type: 'email' }));
+        ({ data, error } = await app.supabase.auth.verifyOtp({ email, token: authInput.token, type: getAuthOtpType(authInput.type) }));
       }
       if (error) throw error;
       if (data?.session) app.session = data.session;
@@ -3214,8 +3230,8 @@ function attachEvents() {
 
   els.installHelpBtn?.addEventListener('click', () => {
     const message = isHomeScreenApp()
-      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, email yourself a sign-in code and enter it here, or paste the copied login link.'
-      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once with the email code or copied login link.';
+      ? 'You are already using the iPhone Home Screen version. If it asks you to sign in, email yourself a login link, then open it or paste the copied Log In link here.'
+      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon. Sign in once with the email login link or copied Log In link.';
     showNotice(message, 'info');
   });
 
