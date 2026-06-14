@@ -2,7 +2,7 @@
 const LEGACY_STORAGE_KEY = 'xena-leads-state-v3';
 const STATE_STORAGE_KEY = 'xena-leads-state-v4';
 const MAGIC_LINK_COOLDOWN_KEY = 'xena-leads-magic-link-cooldown-until';
-const MAGIC_LINK_COOLDOWN_MS = 60 * 1000;
+const MAGIC_LINK_COOLDOWN_MS = 75 * 1000;
 const AUTH_EMAIL_STORAGE_KEY = 'leadflow-last-auth-email';
 const CONFIG_PATH = './config.js';
 const INBOX_IMPORTED_KEY = 'xena-leads-inbox-imported';
@@ -139,6 +139,8 @@ const app = {
   aiTriageAvailable: false,
   aiTriageDrafts: {},
   aiTriageLoading: new Set(),
+  magicLinkSending: false,
+  magicLinkCooldownTimer: null,
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -171,6 +173,27 @@ function getMagicLinkCooldownRemainingMs() {
 
 function setMagicLinkCooldown(ms = MAGIC_LINK_COOLDOWN_MS) {
   localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(Date.now() + ms));
+}
+
+function updateMagicLinkCooldownUi() {
+  if (!els.sendMagicLinkBtn || els.sendMagicLinkBtn.hidden || app.session) return;
+  if (app.magicLinkSending) return;
+  const remainingMs = getMagicLinkCooldownRemainingMs();
+  if (remainingMs > 0) {
+    const seconds = Math.ceil(remainingMs / 1000);
+    els.sendMagicLinkBtn.disabled = true;
+    els.sendMagicLinkBtn.textContent = `Wait ${seconds}s`;
+    if (!app.magicLinkCooldownTimer) {
+      app.magicLinkCooldownTimer = window.setInterval(updateMagicLinkCooldownUi, 1000);
+    }
+    return;
+  }
+  els.sendMagicLinkBtn.disabled = false;
+  els.sendMagicLinkBtn.textContent = 'Email me a login link';
+  if (app.magicLinkCooldownTimer) {
+    window.clearInterval(app.magicLinkCooldownTimer);
+    app.magicLinkCooldownTimer = null;
+  }
 }
 
 function parseLeadDate(value) {
@@ -936,6 +959,7 @@ function refreshAuthUi() {
         : isLikelyEmbeddedBrowser
           ? 'This looks like an in-app browser. For the most reliable saved login, open LeadFlow in Safari, then use the email login link.'
           : 'Sign in once with the email login link. LeadFlow will save the session in this browser.';
+    updateMagicLinkCooldownUi();
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -3081,20 +3105,21 @@ function attachEvents() {
   });
 
   els.sendMagicLinkBtn.addEventListener('click', async () => {
-    const originalLabel = els.sendMagicLinkBtn.textContent;
     try {
       if (!(app.supabase && isSupabaseEnabled())) return;
-      const email = els.authEmail.value.trim();
-      if (!email) throw new Error('Enter an email address first.');
-      try { localStorage.setItem(AUTH_EMAIL_STORAGE_KEY, email); } catch {}
-      const cooldownRemainingMs = getMagicLinkCooldownRemainingMs();
-      if (cooldownRemainingMs > 0) {
-        setDefaultSyncStatus();
+      if (app.magicLinkSending || getMagicLinkCooldownRemainingMs() > 0) {
+        updateMagicLinkCooldownUi();
+        const cooldownRemainingMs = getMagicLinkCooldownRemainingMs();
         showNotice(`Check your email or wait ${Math.ceil(cooldownRemainingMs / 1000)} seconds before requesting another login link.`, 'info');
         return;
       }
+      const email = els.authEmail.value.trim();
+      if (!email) throw new Error('Enter an email address first.');
+      try { localStorage.setItem(AUTH_EMAIL_STORAGE_KEY, email); } catch {}
+      setMagicLinkCooldown();
+      app.magicLinkSending = true;
       els.sendMagicLinkBtn.disabled = true;
-      els.sendMagicLinkBtn.textContent = 'Sending…';
+      els.sendMagicLinkBtn.textContent = 'Sending...';
       const { error } = await app.supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: getAuthRedirectUrl() }
@@ -3106,21 +3131,22 @@ function attachEvents() {
         els.authOtp.value = '';
       }
       refreshAuthUi();
-      setMagicLinkCooldown();
       setSyncStatus('Email sent');
       showNotice('Login link sent. Open the email and tap Log In to sign in on this device.', 'info');
     } catch (error) {
       const message = error?.message || '';
       if (/rate limit/i.test(message)) {
-        setMagicLinkCooldown();
+        setMagicLinkCooldown(90 * 1000);
         setDefaultSyncStatus();
-        showNotice('Too many login links were requested. Wait about a minute, then try again.', 'info');
+        updateMagicLinkCooldownUi();
+        showNotice('Too many login links were requested. Wait about 90 seconds, then try again.', 'info');
         return;
       }
+      try { localStorage.removeItem(MAGIC_LINK_COOLDOWN_KEY); } catch {}
       handleError(error);
     } finally {
-      els.sendMagicLinkBtn.disabled = false;
-      els.sendMagicLinkBtn.textContent = originalLabel;
+      app.magicLinkSending = false;
+      updateMagicLinkCooldownUi();
     }
   });
 
