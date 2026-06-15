@@ -127,7 +127,21 @@ const ALLOWED_FIELDS = new Set([
 ]);
 
 const VALID_PRIORITIES = new Set(['URGENT', 'HIGH', 'MEDIUM', 'LOW']);
-const VALID_STATUSES = new Set(['new', 'follow_up', 'existing_matter', 'closed']);
+const VALID_STATUSES = new Set([
+  'new',
+  'follow_up',
+  'contacted',
+  'awaiting_reply',
+  'awaiting_documents',
+  'awaiting_legal_aid',
+  'ready_for_leap',
+  'opened_in_leap',
+  'existing_matter',
+  'not_a_lead',
+  'declined',
+  'closed_no_response',
+  'closed',
+]);
 
 const MAX_TEXT = 1000;
 const MAX_NOTES = 10_000;

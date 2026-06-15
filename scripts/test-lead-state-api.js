@@ -108,7 +108,7 @@ async function withMockedSupabase(fetchImpl, fn) {
       assert('writes core state', row.lead_id === 123 && row.actioned === true);
       assert('omits optional migration fields from write payload', !('prospective_status' in postedBody) && !('conflict_status' in postedBody));
       assert('keeps comment field in write payload', 'comment' in postedBody);
-      assert('mirrors follow-up stage onto lead.status', patchedLeadStatus === 'closed');
+      assert('mirrors exact lifecycle stage onto lead.status', patchedLeadStatus === 'existing_matter');
     });
   }
 
@@ -119,9 +119,9 @@ async function withMockedSupabase(fetchImpl, fn) {
     assert('closed_no_response derives no_action', closed.no_action === true);
     const opened = deriveCoreState({ prospective_status: 'opened_in_leap' });
     assert('opened_in_leap derives leap', opened.actioned === true && opened.leap === true);
-    assert('awaiting_reply maps to follow_up', leadStatusFromProspective('awaiting_reply') === 'follow_up');
-    assert('ready_for_leap maps to follow_up on base schema', leadStatusFromProspective('ready_for_leap') === 'follow_up');
-    assert('declined maps to closed', leadStatusFromProspective('declined') === 'closed');
+    assert('awaiting_reply maps exactly', leadStatusFromProspective('awaiting_reply') === 'awaiting_reply');
+    assert('ready_for_leap maps exactly', leadStatusFromProspective('ready_for_leap') === 'ready_for_leap');
+    assert('declined maps exactly', leadStatusFromProspective('declined') === 'declined');
   }
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

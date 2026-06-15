@@ -95,12 +95,18 @@ function deriveCoreState(body) {
 
 function leadStatusFromProspective(value) {
   if (!value) return null;
-  if (['opened_in_leap', 'existing_matter', 'not_a_lead', 'declined', 'closed_no_response'].includes(value)) {
-    return 'closed';
-  }
-  if (['contacted', 'awaiting_reply', 'awaiting_documents', 'awaiting_legal_aid', 'ready_for_leap'].includes(value)) {
-    return 'follow_up';
-  }
+  if ([
+    'contacted',
+    'awaiting_reply',
+    'awaiting_documents',
+    'awaiting_legal_aid',
+    'ready_for_leap',
+    'opened_in_leap',
+    'existing_matter',
+    'not_a_lead',
+    'declined',
+    'closed_no_response',
+  ].includes(value)) return value;
   if (value === 'new_lead') return 'new';
   return null;
 }

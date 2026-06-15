@@ -85,7 +85,7 @@ for (const p of ['URGENT', 'HIGH', 'MEDIUM', 'LOW']) {
 
 // ── validateAndSanitise — status allowlist ────────────────────────────────────
 console.log('\nvalidateAndSanitise — status');
-for (const s of ['new', 'follow_up', 'existing_matter', 'closed']) {
+for (const s of ['new', 'follow_up', 'contacted', 'awaiting_reply', 'ready_for_leap', 'opened_in_leap', 'existing_matter', 'declined', 'closed_no_response', 'closed']) {
   const { record } = validateAndSanitise({ sender_name: 'A', status: s });
   assert(`accepts status ${s}`, record.status === s);
 }

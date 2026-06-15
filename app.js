@@ -364,9 +364,10 @@ function isLeadReadyForLeap(state) {
 }
 
 function getFollowUpPriority(lead, state) {
-  if (!state.prospectiveStatus || PROSPECT_TERMINAL_STATUSES.has(state.prospectiveStatus)) return null;
+  const effectiveStatus = getEffectiveProspectiveStatus(lead, state);
+  if (!effectiveStatus || PROSPECT_TERMINAL_STATUSES.has(effectiveStatus)) return null;
 
-  if (isLeadReadyForLeap(state)) {
+  if (effectiveStatus === 'ready_for_leap') {
     return { bucket: 'ready', label: 'Ready to Open Matter' };
   }
 
@@ -376,18 +377,32 @@ function getFollowUpPriority(lead, state) {
     return { bucket: 'due', label: daysUntil < 0 ? `Overdue since ${formatDateOnly(followUpDate)}` : 'Due today' };
   }
 
-  if (isProspectStale(lead, state)) {
+  if (isProspectStale(lead, { ...state, prospectiveStatus: effectiveStatus })) {
     return { bucket: 'stale', label: 'Stale follow-up' };
   }
 
   return null;
 }
 
+function getEffectiveProspectiveStatus(lead, state) {
+  const stateStatus = String(state?.prospectiveStatus || '').trim();
+  if (stateStatus) return stateStatus;
+  const importedStatus = String(lead?.status || '').trim().toLowerCase();
+  if (PROSPECT_STATUSES.some((status) => status.value === importedStatus)) {
+    return importedStatus;
+  }
+  if (importedStatus === 'existing_matter') return 'existing_matter';
+  if (importedStatus === 'closed') return 'closed_no_response';
+  if (importedStatus === 'follow_up') return 'contacted';
+  return '';
+}
+
 function getPipelineTab(lead, state) {
+  const effectiveStatus = getEffectiveProspectiveStatus(lead, state);
   if (state.actioned || state.noAction ||
-      PROSPECT_TERMINAL_STATUSES.has(state.prospectiveStatus)) return 'closed';
-  if (state.prospectiveStatus === 'ready_for_leap') return 'ready';
-  if (['contacted', 'awaiting_reply', 'awaiting_documents', 'awaiting_legal_aid'].includes(state.prospectiveStatus)) return 'followup';
+      PROSPECT_TERMINAL_STATUSES.has(effectiveStatus)) return 'closed';
+  if (effectiveStatus === 'ready_for_leap') return 'ready';
+  if (['contacted', 'awaiting_reply', 'awaiting_documents', 'awaiting_legal_aid'].includes(effectiveStatus)) return 'followup';
   const importedStatus = String(lead.status || '').toLowerCase();
   if (importedStatus === 'closed' || importedStatus === 'existing_matter') return 'closed';
   if (importedStatus === 'follow_up') return 'followup';
@@ -442,6 +457,15 @@ function normalizeName(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeSubject(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^(re|fw|fwd)\s*:\s*/i, '')
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, ' ');
+}
+
 function getLocalDateInputValue(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -477,11 +501,11 @@ function inboxMatchesExistingLead(email) {
 function inboxEmailHasLeadRecord(email) {
   const emailId = String(email?.id || '');
   const fromEmail = String(email?.from_email || '').trim().toLowerCase();
-  const subject = String(email?.subject || '').trim().toLowerCase();
+  const subject = normalizeSubject(email?.subject);
   return app.leads.some((lead) => {
     const leadId = String(lead.id || '');
     const leadEmail = String(lead.sender_email || '').trim().toLowerCase();
-    const leadSubject = String(lead.subject || '').trim().toLowerCase();
+    const leadSubject = normalizeSubject(lead.subject);
     return (emailId && leadId === emailId) ||
       (fromEmail && subject && leadEmail === fromEmail && leadSubject === subject);
   });
@@ -1258,7 +1282,7 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
     stage
   });
 
-  const leadStatus = stage === 'follow_up' ? 'follow_up' : 'new';
+  const leadStatus = stage === 'follow_up' ? 'follow_up' : (stage === 'existing_matter' ? 'existing_matter' : 'new');
   const lead = buildLeadFromInboxEmail(email, leadStatus);
 
   // Mark imported in inbox tracking regardless of write path.
@@ -1282,7 +1306,7 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
   if (app.session && isSupabaseEnabled()) {
     try {
       const { _isManualDraft: _ignored, id: _id, ...serverPayload } = lead;
-      serverPayload.status = leadStatus === 'follow_up' ? 'follow_up' : 'new';
+      serverPayload.status = leadStatus;
       const serverLead = await postLeadToServer(serverPayload);
       await loadLeads();
       mergeManualLeadsIntoApp();
@@ -1293,9 +1317,9 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
         // match app.remoteLeadIds, causing the stage to silently go unsynced.
         const stateId = serverLead?.id ?? lead.id;
         setLeadState(stateId, patch);
-        if (serverLead?.id) void saveStateRemote(serverLead.id);
+        if (serverLead?.id) await saveStateRemote(serverLead.id);
       }
-      if (stage !== 'existing_matter') app.currentTab = stage === 'new_lead' ? 'new_leads' : 'followup';
+      app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'existing_matter' ? 'closed' : 'followup');
       app.heroFilter = 'all';
       updateTabUi();
       updateHeroFilterUi();
@@ -1310,7 +1334,7 @@ async function importInboxEmailWithStage(emailId, stage = 'new_lead') {
 
   persistInboxLeadLocally(lead);
   if (Object.keys(patch).length) setLeadState(lead.id, patch);
-  if (stage !== 'existing_matter') app.currentTab = stage === 'new_lead' ? 'new_leads' : 'followup';
+  app.currentTab = stage === 'new_lead' ? 'new_leads' : (stage === 'existing_matter' ? 'closed' : 'followup');
   app.heroFilter = 'all';
   updateTabUi();
   updateHeroFilterUi();
@@ -1441,16 +1465,17 @@ async function loadSupabaseState() {
   const data = (await response.json()).states || [];
   const next = {};
   for (const row of data || []) {
+    const existing = getLeadState(row.lead_id);
     next[String(row.lead_id)] = {
       actioned: Boolean(row.actioned),
       leap: Boolean(row.leap),
       noAction: Boolean(row.no_action),
       laAccepted: Boolean(row.la_accepted),
       comment: row.comment || '',
-      prospectiveStatus: row.prospective_status || '',
-      followUpDate: row.follow_up_date || '',
-      conflictStatus: row.conflict_status || '',
-      conflictNotes: row.conflict_notes || '',
+      prospectiveStatus: Object.prototype.hasOwnProperty.call(row, 'prospective_status') ? (row.prospective_status || '') : existing.prospectiveStatus,
+      followUpDate: Object.prototype.hasOwnProperty.call(row, 'follow_up_date') ? (row.follow_up_date || '') : existing.followUpDate,
+      conflictStatus: Object.prototype.hasOwnProperty.call(row, 'conflict_status') ? (row.conflict_status || '') : existing.conflictStatus,
+      conflictNotes: Object.prototype.hasOwnProperty.call(row, 'conflict_notes') ? (row.conflict_notes || '') : existing.conflictNotes,
     };
   }
   app.state = { ...app.state, ...next };
@@ -1562,9 +1587,10 @@ function renderLead(lead, index) {
   const agoBadge = ago ? `<span class="${agoClass}">${escapeHtml(ago)}</span>` : '';
   const manualBadge = lead._isManualDraft ? '<span class="manual-draft-badge">Manual draft &middot; device only</span>' : '';
   const prospectPriority = getFollowUpPriority(lead, state);
-  const statusBadgeClass = getStatusBadgeClass(state.prospectiveStatus);
-  const statusBadge = state.prospectiveStatus
-    ? `<span class="${escapeHtml(statusBadgeClass)}">${escapeHtml(getProspectStatusLabel(state.prospectiveStatus))}</span>`
+  const effectiveStatus = getEffectiveProspectiveStatus(lead, state);
+  const statusBadgeClass = getStatusBadgeClass(effectiveStatus);
+  const statusBadge = effectiveStatus
+    ? `<span class="${escapeHtml(statusBadgeClass)}">${escapeHtml(getProspectStatusLabel(effectiveStatus))}</span>`
     : '';
   const staleBadge = prospectPriority?.bucket === 'stale'
     ? `<span class="stale-indicator">${escapeHtml(prospectPriority.label)}</span>`
@@ -1611,7 +1637,7 @@ function renderLead(lead, index) {
   const isExpanded = app.expandedLeads.has(id);
   const prospectSelectClass = [
     'prospect-status-select',
-    state.prospectiveStatus === 'ready_for_leap' ? 'status-ready-leap' : '',
+    effectiveStatus === 'ready_for_leap' ? 'status-ready-leap' : '',
     prospectPriority?.bucket === 'stale' ? 'status-stale' : '',
   ].filter(Boolean).join(' ');
   const followUpDateNote = state.followUpDate
@@ -1659,7 +1685,7 @@ function renderLead(lead, index) {
       <div class="prospect-status-wrap">
         <span class="prospect-status-label">Review stage</span>
         <select class="${escapeHtml(prospectSelectClass)}" data-prospect-status-id="${escapeHtml(id)}" aria-label="Prospective client review stage">
-          ${PROSPECT_STATUSES.map((status) => `<option value="${escapeHtml(status.value)}"${status.value === state.prospectiveStatus ? ' selected' : ''}>${escapeHtml(status.label)}</option>`).join('')}
+          ${PROSPECT_STATUSES.map((status) => `<option value="${escapeHtml(status.value)}"${status.value === effectiveStatus ? ' selected' : ''}>${escapeHtml(status.label)}</option>`).join('')}
         </select>
         <input type="date" value="${escapeHtml(state.followUpDate || '')}" data-followup-date-id="${escapeHtml(id)}" aria-label="Follow-up due date">
         ${followUpDateNote}
@@ -1855,7 +1881,8 @@ function renderFollowUpTab() {
 
   const byStatus = { awaiting_reply: [], awaiting_documents: [], awaiting_legal_aid: [], contacted: [] };
   for (const lead of followupLeads) {
-    const s = getLeadState(getLeadId(lead, app.leads.indexOf(lead))).prospectiveStatus;
+    const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
+    const s = getEffectiveProspectiveStatus(lead, state);
     if (s === 'awaiting_reply') byStatus.awaiting_reply.push(lead);
     else if (s === 'awaiting_documents') byStatus.awaiting_documents.push(lead);
     else if (s === 'awaiting_legal_aid') byStatus.awaiting_legal_aid.push(lead);
@@ -1910,11 +1937,12 @@ function renderClosedTab() {
   const byReason = { opened_in_leap: [], existing_matter: [], not_a_lead: [], declined: [], closed_no_response: [], other: [] };
   for (const lead of closedLeads) {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
-    if (state.prospectiveStatus === 'opened_in_leap' || (state.actioned && state.leap)) byReason.opened_in_leap.push(lead);
-    else if (state.prospectiveStatus === 'existing_matter') byReason.existing_matter.push(lead);
-    else if (state.prospectiveStatus === 'not_a_lead') byReason.not_a_lead.push(lead);
-    else if (state.prospectiveStatus === 'declined' || state.noAction) byReason.declined.push(lead);
-    else if (state.prospectiveStatus === 'closed_no_response') byReason.closed_no_response.push(lead);
+    const s = getEffectiveProspectiveStatus(lead, state);
+    if (s === 'opened_in_leap' || (state.actioned && state.leap)) byReason.opened_in_leap.push(lead);
+    else if (s === 'existing_matter') byReason.existing_matter.push(lead);
+    else if (s === 'not_a_lead') byReason.not_a_lead.push(lead);
+    else if (s === 'declined' || state.noAction) byReason.declined.push(lead);
+    else if (s === 'closed_no_response') byReason.closed_no_response.push(lead);
     else byReason.other.push(lead);
   }
 
