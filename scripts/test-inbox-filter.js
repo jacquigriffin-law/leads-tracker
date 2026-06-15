@@ -61,6 +61,21 @@ assert('ROSH and Safety Assessment reply not proposed as a new lead',
 assert('HDCG Open Day community email not proposed as a new lead',
   notLead('susan.kilgour@bigpond.com', 'Susan Kilgour', 'RE: HDCG Open Day talk', 'Good afternoon garden gurus, Thank you for participating in the HD Community Garden Open Day.'));
 
+assert('One-letter forwarded SMS is not proposed as a new lead',
+  notLead('forwarder@app.forward-sms.app', 'Forward SMS', 'New message: A', 'A'));
+
+assert('Facebook group request hidden',
+  hide('groupupdates@facebookmail.com', 'Facebook', 'Jodie Browne requested to participate in Family Law Assist Information Service'));
+
+assert('Generic LawConnect portal notice is not proposed as a new lead',
+  notLead('mason.cordaro@lawconnect.com', 'Mason Cordaro', 'LawConnect has case matters for you', 'Log in to review case matters.'));
+
+assert('LawConnect sales outreach is not proposed as a new lead',
+  notLead('mason.cordaro@lawconnect.com', 'Mason Cordaro', 'LawConnect has case matters for you', 'We are a platform that connects clients with relevant law firms. Do you regularly take on new clients?'));
+
+assert('Existing portal matter response is not proposed as a new lead',
+  notLead('karenlloyd012@gmail.com', 'karenlloyd012@gmail.com', 'Your Family Law Matter "amended Response"', 'Amended Response attached.'));
+
 // ── Blocked operational domains ───────────────────────────────────────────────
 
 console.log('\nBlocked operational domains');

@@ -175,6 +175,42 @@ function getInboxFetchConfig(now = new Date()) {
   };
 }
 
+function normaliseTextKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^(re|fw|fwd)\s*:\s*/i, '')
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, ' ');
+}
+
+function savedLeadKey(senderEmail, subject) {
+  const email = String(senderEmail || '').trim().toLowerCase();
+  const subj = normaliseTextKey(subject);
+  return email && subj ? `${email}\n${subj}` : '';
+}
+
+async function fetchSavedLeadKeys() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) return new Set();
+  const supabaseUrl = process.env.SUPABASE_URL || 'https://lviislwimdvxuuvmvzfn.supabase.co';
+  const url = `${supabaseUrl}/rest/v1/leads?select=sender_email,subject`;
+  const res = await fetch(url, {
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Supabase saved-lead lookup failed ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const rows = await res.json().catch(() => []);
+  return new Set((Array.isArray(rows) ? rows : [])
+    .map((lead) => savedLeadKey(lead.sender_email, lead.subject))
+    .filter(Boolean));
+}
+
 async function getGraphToken(clientId, tenantId, clientSecret) {
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
@@ -408,7 +444,14 @@ module.exports = async (req, res) => {
   // Keep only likely new legal leads/referrals for the LeadFlow New Inbox.
   // Neutral human replies are excluded here so ordinary inbox follow-ups do not
   // get proposed as new leads.
-  const leadEmails = allEmails.filter((e) => isLikelyNewLead(e.from_email, e.from_name, e.subject, e.snippet));
+  const likelyLeadEmails = allEmails.filter((e) => isLikelyNewLead(e.from_email, e.from_name, e.subject, e.snippet));
+  let savedLeadKeys = new Set();
+  try {
+    savedLeadKeys = await fetchSavedLeadKeys();
+  } catch (err) {
+    audit('inbox.saved_lookup_error', { ip: clientIp, user: authedUser, error: err?.message || 'unknown' });
+  }
+  const leadEmails = likelyLeadEmails.filter((e) => !savedLeadKeys.has(savedLeadKey(e.from_email, e.subject)));
   const hiddenCount = allEmails.length - leadEmails.length;
   if (hiddenCount > 0) {
     audit('inbox.system_filtered', { ip: clientIp, user: authedUser, hidden_count: hiddenCount });
@@ -438,6 +481,7 @@ module.exports = async (req, res) => {
 module.exports._test = {
   fetchJGMS,
   fetchIMAP,
+  savedLeadKey,
   getInboxFetchConfig,
   ImapFlowRef,
   simpleParserRef,

@@ -22,7 +22,11 @@
 // domains are trusted, but not every message from them is a new lead, so they
 // still need new-lead/referral wording and are filtered for newsletters/admin.
 const DEDICATED_LEAD_DOMAINS = new Set([
-  'lawconnect.com.au', 'finchly.com.au', 'forward-sms.app',
+  'finchly.com.au',
+]);
+
+const PLATFORM_LEAD_DOMAINS = new Set([
+  'lawconnect.com', 'lawconnect.com.au', 'forward-sms.app',
 ]);
 
 const TRUSTED_REFERRAL_DOMAINS = new Set([
@@ -54,6 +58,12 @@ const STRONG_NEW_LEAD_SIGNALS = [
   'referral', 'referred', 'potential client', 'need a solicitor', 'need a lawyer',
   'seeking representation', 'looking for a solicitor', 'looking for a lawyer',
   'can you represent', 'i need legal advice', 'i need legal help', 'grant of aid',
+];
+
+const SMS_LEAD_SIGNALS = [
+  'sms from', 'text from', 'forwarded sms',
+  'need a solicitor', 'need a lawyer', 'legal advice', 'legal help',
+  'family law', 'divorce', 'parenting', 'custody', 'avo', 'dvo',
 ];
 
 const EXISTING_OR_NON_LEAD_SUBJECT_SIGNALS = [
@@ -133,6 +143,7 @@ const BLOCKED_OPERATIONAL_DOMAINS = new Set([
   'linkedin.com',
   'twitter.com', 'x.com',
   'facebook.com', 'meta.com',
+  'facebookmail.com',
   'instagram.com',
   // Known non-lead personal/wellness senders
   'bryanjohnson.com',
@@ -196,6 +207,11 @@ const NOISE_SUBJECT_SIGNALS = [
   'open day', 'talk invitation', 'webinar', 'seminar', 'training', 'cpd',
   'minutes of meeting', 'meeting minutes', 'agenda', 'roster',
   'out of office', 'automatic reply', 'auto reply',
+  // Existing-matter/portal or marketing messages that otherwise contain generic
+  // legal/client words.
+  'your family law matter',
+  'platform that connects clients',
+  'regularly take on new clients',
 ];
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
@@ -225,11 +241,25 @@ function scoreEmail(fromEmail, fromName, subject, snippet = '') {
   };
 
   const isDedicatedLeadDomain = domainMatches(DEDICATED_LEAD_DOMAINS);
+  const isPlatformLeadDomain = domainMatches(PLATFORM_LEAD_DOMAINS);
   const isTrustedReferralDomain = domainMatches(TRUSTED_REFERRAL_DOMAINS);
   const hasStrongLeadSignal = STRONG_NEW_LEAD_SIGNALS.some((sig) => text.includes(sig) || name.includes(sig));
+  const hasNoiseSignal = NOISE_SUBJECT_SIGNALS.some((sig) => subj.includes(sig) || body.includes(sig));
 
   // 1. Dedicated lead intake domains — always show.
   if (isDedicatedLeadDomain) return 100;
+
+  // Platform notifiers can be real leads, but generic/one-letter notifications
+  // should not keep resurfacing in LeadFlow as unsaved work.
+  if (isPlatformLeadDomain) {
+    if (hasNoiseSignal) return -60;
+    const hasPhone = /(?:\+61\s*4|04)\d{2}[\s\-]?\d{3}[\s\-]?\d{3}/.test(text);
+    const hasSmsLeadSignal = SMS_LEAD_SIGNALS.some((sig) => text.includes(sig));
+    if (domainMatches(new Set(['forward-sms.app']))) {
+      return (hasPhone || hasSmsLeadSignal || hasStrongLeadSignal) ? 100 : -70;
+    }
+    return hasStrongLeadSignal ? 100 : -30;
+  }
 
   // 2. Blocked operational domains — always hide (runs before subject checks).
   for (const d of BLOCKED_OPERATIONAL_DOMAINS) {
@@ -237,9 +267,7 @@ function scoreEmail(fromEmail, fromName, subject, snippet = '') {
   }
 
   // 3. Clear noise/admin/non-lead language should not enter the new lead inbox.
-  for (const sig of NOISE_SUBJECT_SIGNALS) {
-    if (subj.includes(sig) || body.includes(sig)) return -60;
-  }
+  if (hasNoiseSignal) return -60;
 
   // Replies/forwards and existing-matter correspondence should not appear as new
   // leads unless they contain strong referral/new-client wording.

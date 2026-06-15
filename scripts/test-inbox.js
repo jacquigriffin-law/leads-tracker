@@ -43,7 +43,7 @@ async function main() {
   const inbox = require(path.join(__dirname, '..', 'api', 'inbox.js'));
   Module._load = realLoad;
 
-  const { fetchJGMS, fetchIMAP, getInboxFetchConfig } = inbox._test;
+  const { fetchJGMS, fetchIMAP, getInboxFetchConfig, savedLeadKey } = inbox._test;
 
   console.log('\ngetInboxFetchConfig');
 
@@ -70,6 +70,16 @@ async function main() {
     const config = getInboxFetchConfig(new Date('2026-04-30T00:00:00.000Z'));
     assert('rejects invalid lookback days', config.lookbackDays === 14, JSON.stringify(config));
     assert('rejects invalid max per source', config.maxPerSource === 120, JSON.stringify(config));
+  }
+
+  console.log('\nsavedLeadKey');
+
+  {
+    const base = savedLeadKey('Client@Example.com ', ' Your Family Law Matter ');
+    const reply = savedLeadKey('client@example.com', 'RE: Your Family Law Matter');
+    assert('normalises saved lead sender and subject', base === reply, `${base} !== ${reply}`);
+    assert('returns blank key when email missing', savedLeadKey('', 'Subject') === '');
+    assert('returns blank key when subject missing', savedLeadKey('client@example.com', '') === '');
   }
 
   console.log('\nfetchJGMS');
