@@ -64,7 +64,28 @@ def main() -> int:
     assert_true('all imported local leads are recognised as already remote', result['missing'] == 0, str(result))
     assert_true('dry-run does not insert', result['inserted'] == 0, str(result))
 
-    print('\n5 tests passed\n')
+    print('\nmerge_remote_into_local')
+    stale_local = [{
+        'id': 27,
+        'sender_name': 'LawAccessNSW',
+        'sender_email': 'donotreply@legalaid.nsw.gov.au',
+        'subject': 'Offer of work from Legal Aid NSW - Family Law matter',
+        'date_received': '2026-05-26T07:30:51Z',
+        'status': 'new',
+    }]
+    remote_closed = [{
+        'id': 27,
+        'sender_name': 'LawAccessNSW',
+        'sender_email': 'donotreply@legalaid.nsw.gov.au',
+        'subject': 'Offer of work from Legal Aid NSW - Family Law matter',
+        'date_received': '2026-05-26T07:30:51+00:00',
+        'status': 'closed_no_response',
+    }]
+    merge_result = sync.merge_remote_into_local(stale_local, remote_closed)
+    assert_true('remote status refreshes stale local JSON', stale_local[0]['status'] == 'closed_no_response', stale_local[0]['status'])
+    assert_true('remote refresh does not duplicate matched lead', merge_result == {'added': 0, 'updated': 1}, str(merge_result))
+
+    print('\n7 tests passed\n')
     return 0
 
 

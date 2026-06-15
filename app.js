@@ -584,8 +584,46 @@ function saveManualLeads(leads) {
   localStorage.setItem(MANUAL_LEADS_KEY, JSON.stringify(leads));
 }
 
+function leadDateDay(value) {
+  const date = parseLeadDate(value);
+  return date ? date.toISOString().slice(0, 10) : '';
+}
+
+function localDraftMatchesRemoteLead(draft, remote) {
+  const draftId = String(draft?.id || '');
+  const remoteId = String(remote?.id || '');
+  if (draftId && remoteId && draftId === remoteId) return true;
+
+  const draftEmail = String(draft?.sender_email || '').trim().toLowerCase();
+  const remoteEmail = String(remote?.sender_email || '').trim().toLowerCase();
+  const draftPhone = normalizePhone(draft?.sender_phone || draft?.phone);
+  const remotePhone = normalizePhone(remote?.sender_phone || remote?.phone);
+  const draftName = normalizeName(draft?.sender_name);
+  const remoteName = normalizeName(remote?.sender_name);
+  const draftSubject = normalizeSubject(draft?.subject);
+  const remoteSubject = normalizeSubject(remote?.subject);
+  const draftDay = leadDateDay(draft?.date_received);
+  const remoteDay = leadDateDay(remote?.date_received);
+
+  if (!draftSubject || !remoteSubject || draftSubject !== remoteSubject) return false;
+  if (draftEmail && remoteEmail && draftEmail === remoteEmail) return true;
+  if (draftPhone && remotePhone && draftPhone === remotePhone) return true;
+  if (draftName && remoteName && draftName === remoteName && (!draftDay || !remoteDay || draftDay === remoteDay)) return true;
+  return false;
+}
+
+function pruneManualLeadsAlreadyInRemote() {
+  if (!isSupabaseEnabled() || !app.session || !app.remoteLeadIds.size) return;
+  const manual = loadManualLeads();
+  if (!manual.length) return;
+  const remoteLeads = app.leads.filter((lead) => !lead._isManualDraft);
+  const kept = manual.filter((draft) => !remoteLeads.some((remote) => localDraftMatchesRemoteLead(draft, remote)));
+  if (kept.length !== manual.length) saveManualLeads(kept);
+}
+
 function mergeManualLeadsIntoApp() {
   app.leads = app.leads.filter((l) => !l._isManualDraft);
+  pruneManualLeadsAlreadyInRemote();
   const manual = loadManualLeads().map((l) => ({ ...l, _isManualDraft: true }));
   app.leads = [...manual, ...app.leads];
 }

@@ -94,6 +94,8 @@ globalThis.__leadflowAppTest = {
   getEffectiveProspectiveStatus,
   getPipelineTab,
   getDurableStateForHidden,
+  localDraftMatchesRemoteLead,
+  mergeManualLeadsIntoApp,
   inboxEmailNeedsAction,
   importInboxEmailWithStage,
   loadSupabaseState,
@@ -177,6 +179,37 @@ globalThis.__leadflowAppTest = {
     app.inboxImported = new Set();
     const email = { id: 'email-99', from_email: 'client@example.com', subject: 'RE: Your Family Law Matter' };
     assert('matches saved lead despite reply prefix', api.inboxEmailNeedsAction(email) === false);
+  }
+
+  console.log('\nold local draft duplicates do not override Supabase');
+  {
+    const remote = {
+      id: 27,
+      sender_name: 'LawAccessNSW',
+      sender_email: 'donotreply@legalaid.nsw.gov.au',
+      subject: 'Offer of work from Legal Aid NSW - Family Law matter',
+      date_received: '2026-05-26T07:30:51+00:00',
+      status: 'closed_no_response',
+    };
+    const staleDraft = {
+      id: 'manual-old-fallback',
+      sender_name: 'LawAccessNSW',
+      sender_email: 'donotreply@legalaid.nsw.gov.au',
+      subject: 'RE: Offer of work from Legal Aid NSW - Family Law matter',
+      date_received: '2026-05-26T07:30:51Z',
+      status: 'new',
+    };
+    assert('local fallback draft matches remote row despite reply prefix', api.localDraftMatchesRemoteLead(staleDraft, remote) === true);
+
+    app.config.supabase.enabled = true;
+    app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    app.remoteLeadIds = new Set([27]);
+    app.leads = [remote];
+    storage.set('xena-leads-manual-drafts-v1', JSON.stringify([staleDraft]));
+    api.mergeManualLeadsIntoApp();
+    assert('matched local draft is removed from rendered leads', app.leads.length === 1 && app.leads[0].id === 27, JSON.stringify(app.leads));
+    assert('matched local draft is purged from storage', JSON.parse(storage.get('xena-leads-manual-drafts-v1') || '[]').length === 0);
+    assert('remote closed status still renders Closed', api.getPipelineTab(app.leads[0], api.getLeadState('27')) === 'closed');
   }
 
   console.log('\nimport existing matter persists before render');

@@ -1,4 +1,4 @@
-const LEADFLOW_CACHE = 'leadflow-app-shell-v10';
+const LEADFLOW_CACHE = 'leadflow-app-shell-v11';
 const APP_SHELL = [
   '/',
   '/index.html',
