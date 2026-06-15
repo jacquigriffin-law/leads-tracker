@@ -93,9 +93,11 @@ globalThis.__leadflowAppTest = {
   setLeadState,
   getEffectiveProspectiveStatus,
   getPipelineTab,
+  getDurableStateForHidden,
   inboxEmailNeedsAction,
   importInboxEmailWithStage,
   loadSupabaseState,
+  saveStateRemote,
 };
 `;
   vm.runInNewContext(source, sandbox, { filename: appPath });
@@ -112,6 +114,9 @@ globalThis.__leadflowAppTest = {
     assert('declined lead.status renders Closed', api.getPipelineTab({ status: 'declined' }, api.getLeadState('2')) === 'closed');
     assert('closed lead.status renders Closed', api.getPipelineTab({ status: 'closed' }, api.getLeadState('3')) === 'closed');
     assert('follow_up lead.status renders Follow-up', api.getPipelineTab({ status: 'follow_up' }, api.getLeadState('4')) === 'followup');
+    assert('base actioned state overrides status=new after refresh', api.getPipelineTab({ status: 'new' }, { actioned: true }) === 'closed');
+    assert('base no_action state overrides status=new after refresh', api.getPipelineTab({ status: 'new' }, { noAction: true }) === 'closed');
+    assert('base leap state overrides status=new after refresh', api.getPipelineTab({ status: 'new' }, { actioned: true, leap: true }) === 'closed');
   }
 
   console.log('\nbase lead_states rows do not wipe local extended state');
@@ -140,6 +145,24 @@ globalThis.__leadflowAppTest = {
     assert('keeps local prospectiveStatus when production row has no extended column', state.prospectiveStatus === 'declined', JSON.stringify(state));
     assert('keeps local conflictStatus when production row has no extended column', state.conflictStatus === 'requested', JSON.stringify(state));
     assert('applies base actioned/noAction fields', state.actioned === true && state.noAction === true, JSON.stringify(state));
+  }
+
+  console.log('\nlocal hidden/delete state is archived durably');
+  {
+    const hiddenState = api.getDurableStateForHidden({ hidden: true, actioned: false, noAction: false, prospectiveStatus: '' });
+    assert('hidden maps to closed no-response', hiddenState.hidden === false && hiddenState.actioned === true && hiddenState.noAction === true && hiddenState.prospectiveStatus === 'closed_no_response', JSON.stringify(hiddenState));
+
+    app.supabase = { rpc: async () => ({ error: null }) };
+    app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    app.remoteLeadIds = new Set([1234]);
+    api.setLeadState('1234', { hidden: true });
+    sandbox.fetch = async (url, options = {}) => {
+      assert('saves hidden lead through lead-state API', String(url) === '/api/lead-state', String(url));
+      const body = JSON.parse(options.body);
+      assert('hidden save uses durable closed payload', body.actioned === true && body.no_action === true && body.prospective_status === 'closed_no_response', JSON.stringify(body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    };
+    await api.saveStateRemote('1234');
   }
 
   console.log('\nsaved/closed inbox messages stay suppressed');

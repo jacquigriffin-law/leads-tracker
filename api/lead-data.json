@@ -747,8 +747,30 @@
       "opposing_party": "Unknown",
       "next_action": "Review approval",
       "source_ref": "AAMkAGM1NGYxM2U4LTNjZTQtNGQzNS1hMTczLTI0ZDM2MWFhMzkxYgBGAAAAAADJQz0EWiGrRJ24dHG0Xy49BwC-ywsYXsDGTLPI9ARkKc9BAAAAAAEMAADP0FDOAbpQQ4oqj5IuoqohAAiojxCJAAA="
+    },
+    {
+      "id": 1781506096048,
+      "source_account": "jacquigriffin@mobilesolicitor.com.au",
+      "date_received": "2026-06-15T07:52:30Z",
+      "sender_name": "LawAccessNSW",
+      "sender_email": "donotreply@legalaid.nsw.gov.au",
+      "sender_phone": null,
+      "subject": "Offer of work from Legal Aid NSW - Care and Protection",
+      "source_rule": "Legal Aid NSW",
+      "source_platform": "Legal Aid NSW",
+      "matter_type": "Care & Protection",
+      "priority": "URGENT",
+      "status": "new",
+      "notes": "Panel: CARE PANEL\r\nOffer Expiry Date: 16/06/2026 5:52:16 PM\r\nYou have received an offer of work from Legal Aid NSW in a Care and Protection matter. To see the offer, please log in to Grants Online and check the Noticeboard. You can access the Grants Onlin",
+      "draft_reply": "",
+      "raw_preview": "Panel: CARE PANEL\r\nOffer Expiry Date: 16/06/2026 5:52:16 PM\r\nYou have received an offer of work from Legal Aid NSW in a Care and Protection matter. To see the offer, please log in to Grants Online and check the Noticeboard. You can access the Grants Onlin",
+      "reviewed_at": "",
+      "location": "Unknown",
+      "opposing_party": "Unknown",
+      "next_action": "Accept or decline",
+      "source_ref": "AAMkAGM1NGYxM2U4LTNjZTQtNGQzNS1hMTczLTI0ZDM2MWFhMzkxYgBGAAAAAADJQz0EWiGrRJ24dHG0Xy49BwC-ywsYXsDGTLPI9ARkKc9BAAAAAAEMAADP0FDOAbpQQ4oqj5IuoqohAAiojxC4AAA="
     }
   ],
-  "total_count": 34,
-  "last_updated": "2026-06-15T16:58:43+10:00"
+  "total_count": 35,
+  "last_updated": "2026-06-15T18:45:47+10:00"
 }

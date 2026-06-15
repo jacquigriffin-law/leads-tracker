@@ -293,6 +293,17 @@ function hasMeaningfulState(state) {
   );
 }
 
+function getDurableStateForHidden(state) {
+  if (!state?.hidden) return state;
+  return {
+    ...state,
+    hidden: false,
+    actioned: true,
+    noAction: true,
+    prospectiveStatus: state.prospectiveStatus || 'closed_no_response',
+  };
+}
+
 function isProspectStale(lead, state) {
   const status = state.prospectiveStatus;
   if (!status || !FOLLOWUP_STALE_DAYS[status]) return false;
@@ -1485,7 +1496,7 @@ async function loadSupabaseState() {
 async function saveStateRemote(leadId) {
   if (!(app.supabase && app.session)) return;
   if (!app.remoteLeadIds.has(Number(leadId))) return;
-  const state = getLeadState(leadId);
+  const state = getDurableStateForHidden(getLeadState(leadId));
   setSyncStatus('Syncing…');
   const payload = {
     lead_id: Number(leadId),
@@ -1516,6 +1527,15 @@ async function saveStateRemote(leadId) {
 
 async function syncAllMeaningfulStateRemote() {
   if (!(app.supabase && app.session)) return;
+  let migratedHidden = false;
+  for (const [leadId, state] of Object.entries(app.state)) {
+    if (state?.hidden && app.remoteLeadIds.has(Number(leadId))) {
+      app.state[leadId] = getDurableStateForHidden(state);
+      migratedHidden = true;
+    }
+  }
+  if (migratedHidden) persistLocalState();
+
   const entries = Object.entries(app.state).filter(([leadId, state]) => hasMeaningfulState(state) && app.remoteLeadIds.has(Number(leadId)));
   if (!entries.length) {
     setSyncStatus('Synced');
@@ -2234,24 +2254,36 @@ async function handleStateChange(target) {
   }
 }
 
-function handleDeleteLead(target) {
+async function handleDeleteLead(target) {
   const leadId = target.dataset.deleteId;
   if (!leadId) return;
   const row = target.closest('.row');
   const name = row?.querySelector('.name')?.textContent?.trim() || 'this lead';
-  if (!window.confirm(`Delete ${name} from this tracker view?`)) return;
+  if (!window.confirm(`Archive ${name} to Closed?`)) return;
   const lead = app.leads.find((l, i) => getLeadId(l, i) === leadId);
   if (lead?._isManualDraft) {
     removeManualLead(leadId);
     app.leads = app.leads.filter((l) => l.id !== leadId);
+    render();
+    showNotice(`${name} removed from this device.`, 'info');
   } else {
     void logSecurityEvent('lead.hide_local', String(leadId), {
       source: row?.dataset.source || 'unknown'
     });
-    setLeadState(leadId, { hidden: true });
+    setLeadState(leadId, {
+      hidden: false,
+      actioned: true,
+      noAction: true,
+      prospectiveStatus: 'closed_no_response',
+    });
+    render();
+    try {
+      await saveStateRemote(leadId);
+      showNotice(`${name} archived to Closed.`, 'success');
+    } catch (error) {
+      handleError(error);
+    }
   }
-  render();
-  showNotice(`${name} deleted from this tracker view.`, 'info');
 }
 
 let commentTimer;
