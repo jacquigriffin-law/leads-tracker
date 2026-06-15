@@ -6,7 +6,13 @@
 'use strict';
 
 const path = require('path');
-const { STATE_FIELDS, loadStates, saveState } = require(path.join(__dirname, '..', 'api', 'lead-state'))._test;
+const {
+  STATE_FIELDS,
+  deriveCoreState,
+  leadStatusFromProspective,
+  loadStates,
+  saveState,
+} = require(path.join(__dirname, '..', 'api', 'lead-state'))._test;
 
 let passed = 0;
 let failed = 0;
@@ -75,10 +81,15 @@ async function withMockedSupabase(fetchImpl, fn) {
   console.log('\nsaveState');
   {
     let postedBody = null;
+    let patchedLeadStatus = null;
     await withMockedSupabase(async (url, options = {}) => {
       const u = String(url);
       if (u.includes('select=user_id')) {
         return jsonResponse(200, [{ user_id: '00000000-0000-0000-0000-000000000001' }]);
+      }
+      if (options.method === 'PATCH' && u.includes('/rest/v1/leads?')) {
+        patchedLeadStatus = JSON.parse(options.body).status;
+        return jsonResponse(204, null);
       }
       if (options.method === 'POST') {
         postedBody = JSON.parse(options.body);
@@ -97,7 +108,20 @@ async function withMockedSupabase(fetchImpl, fn) {
       assert('writes core state', row.lead_id === 123 && row.actioned === true);
       assert('omits optional migration fields from write payload', !('prospective_status' in postedBody) && !('conflict_status' in postedBody));
       assert('keeps comment field in write payload', 'comment' in postedBody);
+      assert('mirrors follow-up stage onto lead.status', patchedLeadStatus === 'closed');
     });
+  }
+
+  console.log('\nderiveCoreState / leadStatusFromProspective');
+  {
+    const closed = deriveCoreState({ prospective_status: 'closed_no_response' });
+    assert('closed_no_response derives actioned', closed.actioned === true);
+    assert('closed_no_response derives no_action', closed.no_action === true);
+    const opened = deriveCoreState({ prospective_status: 'opened_in_leap' });
+    assert('opened_in_leap derives leap', opened.actioned === true && opened.leap === true);
+    assert('awaiting_reply maps to follow_up', leadStatusFromProspective('awaiting_reply') === 'follow_up');
+    assert('ready_for_leap maps to follow_up on base schema', leadStatusFromProspective('ready_for_leap') === 'follow_up');
+    assert('declined maps to closed', leadStatusFromProspective('declined') === 'closed');
   }
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

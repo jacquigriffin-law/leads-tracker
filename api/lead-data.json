@@ -529,6 +529,28 @@
       "source_ref": "AAMkAGM1NGYxM2U4LTNjZTQtNGQzNS1hMTczLTI0ZDM2MWFhMzkxYgBGAAAAAADJQz0EWiGrRJ24dHG0Xy49BwC-ywsYXsDGTLPI9ARkKc9BAAAAAAEMAADP0FDOAbpQQ4oqj5IuoqohAAiWIaIvAAA="
     },
     {
+      "id": 1781506096047,
+      "source_account": "NTRRLS",
+      "date_received": "2026-05-18T05:27:57+00:00",
+      "sender_name": "karenlloyd012@gmail.com",
+      "sender_email": "karenlloyd012@gmail.com",
+      "sender_phone": "0427 663 685",
+      "subject": "Your Family Law Matter \"amended Response\"",
+      "source_rule": "Live inbox (NTRRLS) - NTRRLS",
+      "source_platform": "Email",
+      "matter_type": "Unknown",
+      "priority": "MEDIUM",
+      "status": "follow_up",
+      "notes": null,
+      "draft_reply": null,
+      "raw_preview": "Hello, Can you let me know if you are receiving this ok, as I'm not sure its getting through ok?",
+      "reviewed_at": null,
+      "location": "Unknown",
+      "opposing_party": "Unknown",
+      "next_action": "Follow up with prospective/existing matter",
+      "source_ref": "supabase:1781506096047"
+    },
+    {
       "id": 21,
       "source_account": "jacquigriffin@mobilesolicitor.com.au",
       "date_received": "2026-05-21T04:11:07Z",
@@ -703,8 +725,30 @@
       "opposing_party": "Unknown",
       "next_action": "Review approval",
       "source_ref": "AAMkAGM1NGYxM2U4LTNjZTQtNGQzNS1hMTczLTI0ZDM2MWFhMzkxYgBGAAAAAADJQz0EWiGrRJ24dHG0Xy49BwC-ywsYXsDGTLPI9ARkKc9BAAAAAAEMAADP0FDOAbpQQ4oqj5IuoqohAAilbcu-AAA="
+    },
+    {
+      "id": 33,
+      "source_account": "jacquigriffin@mobilesolicitor.com.au",
+      "date_received": "2026-06-15T01:19:19Z",
+      "sender_name": "LawAccessNSW",
+      "sender_email": "donotreply@legalaid.nsw.gov.au",
+      "sender_phone": null,
+      "subject": "FAMILY LAW Legal Aid Approval: LILY THOMAS 26F008734",
+      "source_rule": "Legal Aid NSW",
+      "source_platform": "Legal Aid NSW",
+      "matter_type": "Family Law",
+      "priority": "HIGH",
+      "status": "new",
+      "notes": "An extension of legal aid has been approved.\r\n\r\nYou can access the Grants Online login page at the following link:\r\n\r\nhttps://elodge.legalaid.nsw.gov.au\r\n\r\nOnce logged in you can access the extension approval notification directly from the following link:",
+      "draft_reply": "",
+      "raw_preview": "An extension of legal aid has been approved.\r\n\r\nYou can access the Grants Online login page at the following link:\r\n\r\nhttps://elodge.legalaid.nsw.gov.au\r\n\r\nOnce logged in you can access the extension approval notification directly from the following link:",
+      "reviewed_at": "",
+      "location": "Unknown",
+      "opposing_party": "Unknown",
+      "next_action": "Review approval",
+      "source_ref": "AAMkAGM1NGYxM2U4LTNjZTQtNGQzNS1hMTczLTI0ZDM2MWFhMzkxYgBGAAAAAADJQz0EWiGrRJ24dHG0Xy49BwC-ywsYXsDGTLPI9ARkKc9BAAAAAAEMAADP0FDOAbpQQ4oqj5IuoqohAAiojxCJAAA="
     }
   ],
-  "total_count": 32,
-  "last_updated": "2026-06-14T17:12:48+10:00"
+  "total_count": 34,
+  "last_updated": "2026-06-15T16:58:43+10:00"
 }

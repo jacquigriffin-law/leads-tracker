@@ -65,6 +65,46 @@ function sanitiseDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
+function deriveCoreState(body) {
+  const prospectiveStatus = sanitiseText(body.prospective_status, 64);
+  const terminalStatuses = new Set([
+    'opened_in_leap',
+    'existing_matter',
+    'not_a_lead',
+    'declined',
+    'closed_no_response',
+  ]);
+  const next = {
+    actioned: sanitiseBool(body.actioned),
+    leap: sanitiseBool(body.leap),
+    no_action: sanitiseBool(body.no_action),
+    la_accepted: sanitiseBool(body.la_accepted),
+  };
+
+  if (prospectiveStatus === 'opened_in_leap') {
+    next.actioned = true;
+    next.leap = true;
+  }
+  if (['existing_matter', 'not_a_lead', 'declined', 'closed_no_response'].includes(prospectiveStatus)) {
+    next.actioned = true;
+    next.no_action = true;
+  }
+
+  return { ...next, prospectiveStatus, terminal: terminalStatuses.has(prospectiveStatus) };
+}
+
+function leadStatusFromProspective(value) {
+  if (!value) return null;
+  if (['opened_in_leap', 'existing_matter', 'not_a_lead', 'declined', 'closed_no_response'].includes(value)) {
+    return 'closed';
+  }
+  if (['contacted', 'awaiting_reply', 'awaiting_documents', 'awaiting_legal_aid', 'ready_for_leap'].includes(value)) {
+    return 'follow_up';
+  }
+  if (value === 'new_lead') return 'new';
+  return null;
+}
+
 async function loadStates() {
   const response = await supabaseFetch(`lead_states?select=${STATE_FIELDS.join(',')}`);
   if (!response.ok) {
@@ -89,13 +129,14 @@ async function saveState(body) {
     throw error;
   }
 
+  const derived = deriveCoreState(body);
   const payload = {
     lead_id: leadId,
     user_id: userId,
-    actioned: sanitiseBool(body.actioned),
-    leap: sanitiseBool(body.leap),
-    no_action: sanitiseBool(body.no_action),
-    la_accepted: sanitiseBool(body.la_accepted),
+    actioned: derived.actioned,
+    leap: derived.leap,
+    no_action: derived.no_action,
+    la_accepted: derived.la_accepted,
     comment: sanitiseText(body.comment, 10000) || '',
   };
 
@@ -114,7 +155,25 @@ async function saveState(body) {
   }
 
   const rows = await response.json();
-  return Array.isArray(rows) ? rows[0] : rows;
+  const saved = Array.isArray(rows) ? rows[0] : rows;
+
+  const leadStatus = leadStatusFromProspective(derived.prospectiveStatus);
+  if (leadStatus) {
+    const statusResponse = await supabaseFetch(`leads?id=eq.${encodeURIComponent(String(leadId))}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({ status: leadStatus }),
+    });
+    if (!statusResponse.ok) {
+      const text = await statusResponse.text().catch(() => '');
+      throw new Error(`Supabase lead status write failed ${statusResponse.status}: ${text.slice(0, 200)}`);
+    }
+  }
+
+  return saved;
 }
 
 module.exports = async (req, res) => {
@@ -164,4 +223,13 @@ module.exports = async (req, res) => {
   }
 };
 
-module.exports._test = { STATE_FIELDS, sanitiseDate, sanitiseText, sanitiseBool, loadStates, saveState };
+module.exports._test = {
+  STATE_FIELDS,
+  sanitiseDate,
+  sanitiseText,
+  sanitiseBool,
+  deriveCoreState,
+  leadStatusFromProspective,
+  loadStates,
+  saveState,
+};

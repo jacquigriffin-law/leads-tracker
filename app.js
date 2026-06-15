@@ -388,6 +388,9 @@ function getPipelineTab(lead, state) {
       PROSPECT_TERMINAL_STATUSES.has(state.prospectiveStatus)) return 'closed';
   if (state.prospectiveStatus === 'ready_for_leap') return 'ready';
   if (['contacted', 'awaiting_reply', 'awaiting_documents', 'awaiting_legal_aid'].includes(state.prospectiveStatus)) return 'followup';
+  const importedStatus = String(lead.status || '').toLowerCase();
+  if (importedStatus === 'closed' || importedStatus === 'existing_matter') return 'closed';
+  if (importedStatus === 'follow_up') return 'followup';
   return 'new_leads';
 }
 
@@ -484,9 +487,13 @@ function inboxEmailHasLeadRecord(email) {
   });
 }
 
+function inboxEmailNeedsAction(email) {
+  return !app.inboxImported.has(String(email?.id || '')) && !inboxEmailHasLeadRecord(email);
+}
+
 function getUnmatchedFollowUpInboxItems() {
   return app.inbox.filter((email) => (
-    (!app.inboxImported.has(String(email.id)) || !inboxEmailHasLeadRecord(email)) &&
+    inboxEmailNeedsAction(email) &&
     !app.inboxDismissed.has(String(email.id)) &&
     inboxLooksLikeProspectiveFollowUp(email) &&
     !inboxMatchesExistingLead(email)
@@ -1057,7 +1064,7 @@ async function loadInbox() {
 
   // Detect new emails during polling (inboxPrevUnread >= 0 after first load)
   app.inboxLastChecked = new Date();
-  const newUnread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
+  const newUnread = app.inbox.filter((e) => inboxEmailNeedsAction(e) && !app.inboxDismissed.has(String(e.id))).length;
   const prevUnread = app.inboxPrevUnread;
   app.inboxPrevUnread = newUnread;
   if (prevUnread >= 0 && app.inboxLive && newUnread > prevUnread) {
@@ -1175,8 +1182,8 @@ function renderInbox() {
     els.emptyState.hidden = true;
     return;
   }
-  const pending = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id)));
-  const dismissed = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && app.inboxDismissed.has(String(e.id)));
+  const pending = app.inbox.filter((e) => inboxEmailNeedsAction(e) && !app.inboxDismissed.has(String(e.id)));
+  const dismissed = app.inbox.filter((e) => inboxEmailNeedsAction(e) && app.inboxDismissed.has(String(e.id)));
 
   const accounts = (app.inboxAccounts && app.inboxAccounts.length) ? app.inboxAccounts : [app.inboxAccount || 'Inbox'];
   const accountLabel = accounts.join(', ');
@@ -1710,7 +1717,7 @@ function getCommandCentreStats() {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
     return getPipelineTab(lead, state) !== 'closed';
   });
-  const inboxUnread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
+  const inboxUnread = app.inbox.filter((e) => inboxEmailNeedsAction(e) && !app.inboxDismissed.has(String(e.id))).length;
   const urgent = activeLeads.filter((lead) => String(lead.priority || '').toUpperCase() === 'URGENT');
   const overdueFollowUps = activeLeads.filter((lead) => {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
@@ -1935,7 +1942,7 @@ function updateSummary() {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
     return isLeadAtRiskForPipeline(lead, state);
   }).length;
-  const unread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
+  const unread = app.inbox.filter((e) => inboxEmailNeedsAction(e) && !app.inboxDismissed.has(String(e.id))).length;
 
   if (els.heroStatUrgent) els.heroStatUrgent.textContent = String(urgentCount);
   if (els.heroStatAging) els.heroStatAging.textContent = String(agingCount);
@@ -1975,7 +1982,7 @@ function updateTabCounts() {
     const tab = getPipelineTab(lead, state);
     counts[tab] = (counts[tab] || 0) + 1;
   }
-  const unread = app.inbox.filter((e) => (!app.inboxImported.has(String(e.id)) || !inboxEmailHasLeadRecord(e)) && !app.inboxDismissed.has(String(e.id))).length;
+  const unread = app.inbox.filter((e) => inboxEmailNeedsAction(e) && !app.inboxDismissed.has(String(e.id))).length;
   const tabs = document.querySelectorAll('.tab');
   if (tabs[0]) tabs[0].innerHTML = `New Leads <span class="actioned-count">${counts.new_leads}</span>`;
   if (tabs[1]) tabs[1].innerHTML = `Follow-up <span class="actioned-count">${counts.followup + getUnmatchedFollowUpInboxItems().length}</span>`;
@@ -2277,6 +2284,8 @@ async function handlePipelineAction(leadId, action) {
     patch.prospectiveStatus = 'existing_matter';
   } else if (action === 'decline') {
     patch.prospectiveStatus = 'declined';
+    patch.actioned = true;
+    patch.noAction = true;
   } else if (action === 'awaiting_reply') {
     patch.prospectiveStatus = 'awaiting_reply';
   } else if (action === 'awaiting_documents') {
@@ -2294,6 +2303,8 @@ async function handlePipelineAction(leadId, action) {
     patch.prospectiveStatus = 'contacted';
   } else if (action === 'close') {
     patch.prospectiveStatus = 'closed_no_response';
+    patch.actioned = true;
+    patch.noAction = true;
   } else {
     return;
   }
