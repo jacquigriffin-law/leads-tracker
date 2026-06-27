@@ -137,6 +137,7 @@ const app = {
   aiTriageDrafts: {},
   aiTriageLoading: new Set(),
   pinSigningIn: false,
+  todoNotesPulled: false,
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -819,6 +820,22 @@ async function syncLeadToTodo(leadId, state = getLeadState(leadId)) {
   }, 12000);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `To Do sync error ${response.status}`);
+  return body;
+}
+
+async function pullTodoNotesToLeadflow() {
+  if (!(app.session && isSupabaseEnabled()) || app.todoNotesPulled) return null;
+  app.todoNotesPulled = true;
+  const response = await fetchWithTimeout('/api/todo-sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${app.session.access_token}`,
+    },
+    body: JSON.stringify({ action: 'pull-task-notes' }),
+  }, 20000);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `To Do note sync error ${response.status}`);
   return body;
 }
 
@@ -2339,6 +2356,14 @@ async function hydrate() {
   migrateLegacyState();
   if (app.supabase && app.session) {
     await loadSupabaseState();
+    try {
+      const todoPull = await pullTodoNotesToLeadflow();
+      if (todoPull?.results?.some((item) => item.action === 'comment_appended')) {
+        await loadSupabaseState();
+      }
+    } catch (error) {
+      clientAudit('todo.pull_error', { error: error?.message || 'unknown' });
+    }
     await syncAllMeaningfulStateRemote();
   }
   render();
