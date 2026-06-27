@@ -92,6 +92,11 @@ function getRequestToken(req) {
   return cookies[COOKIE_NAME] || '';
 }
 
+function getCookieSessionToken(req) {
+  const cookies = parseCookies(req.headers?.cookie || '');
+  return cookies[COOKIE_NAME] || '';
+}
+
 function verifyPinSession(reqOrToken) {
   const token = typeof reqOrToken === 'string' ? reqOrToken : getRequestToken(reqOrToken);
   return verifyToken(token);
@@ -117,6 +122,7 @@ module.exports = {
   verifyPin,
   verifyPinSession,
   verifyLeadflowSession: verifyPinSession,
+  getCookieSessionToken,
   getSessionUser,
   sessionCookie,
   clearSessionCookie,

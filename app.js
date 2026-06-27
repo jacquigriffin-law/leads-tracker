@@ -786,6 +786,42 @@ async function postLeadToServer(payload) {
   return json.lead;
 }
 
+const TODO_SYNC_STATUSES = new Set([
+  'new',
+  'follow_up',
+  'contacted',
+  'awaiting_reply',
+  'awaiting_documents',
+  'awaiting_legal_aid',
+  'ready_for_leap',
+]);
+
+function findLeadById(leadId) {
+  return app.leads.find((lead) => String(lead.id) === String(leadId)) || null;
+}
+
+function shouldSyncLeadToTodo(lead, state) {
+  const status = String(state?.prospectiveStatus || lead?.status || 'new').toLowerCase();
+  return TODO_SYNC_STATUSES.has(status);
+}
+
+async function syncLeadToTodo(leadId, state = getLeadState(leadId)) {
+  if (!(app.session && isSupabaseEnabled())) return null;
+  const lead = findLeadById(leadId);
+  if (!lead || !shouldSyncLeadToTodo(lead, state)) return null;
+  const response = await fetchWithTimeout('/api/todo-sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${app.session.access_token}`,
+    },
+    body: JSON.stringify({ action: 'sync-lead', lead, state }),
+  }, 12000);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `To Do sync error ${response.status}`);
+  return body;
+}
+
 async function handleAddLeadSubmit(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   const name = String(data.name || '').trim();
@@ -915,6 +951,25 @@ function clearPinSession() {
   try { localStorage.removeItem(PIN_SESSION_KEY); } catch {}
 }
 
+async function restorePinSessionFromCookie() {
+  const response = await fetchWithTimeout('/api/auth', {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'same-origin',
+  }, 8000);
+  if (!response.ok) return null;
+  const json = await response.json().catch(() => ({}));
+  if (!json.authenticated || !json.token) return null;
+  const session = {
+    access_token: json.token,
+    expires_at: json.expires_at || '',
+    provider: 'pin',
+    user: json.user || { email: 'PIN session' }
+  };
+  storePinSession(session);
+  return session;
+}
+
 async function signInWithPin(pin) {
   const response = await fetchWithTimeout('/api/auth', {
     method: 'POST',
@@ -943,6 +998,13 @@ async function initSupabase() {
   }
   app.supabase = { serverBacked: true };
   app.session = readStoredPinSession();
+  if (!app.session) {
+    try {
+      app.session = await restorePinSessionFromCookie();
+    } catch (error) {
+      clientAudit('auth.cookie_restore_failed', { error: error?.message || 'unknown' });
+    }
+  }
   refreshAuthUi();
 }
 
@@ -1561,6 +1623,12 @@ async function saveStateRemote(leadId) {
     throw new Error(body.error || `Lead state sync error ${response.status}`);
   }
   setSyncStatus('Synced');
+  try {
+    await syncLeadToTodo(leadId, state);
+  } catch (error) {
+    clientAudit('todo.sync_error', { lead_id: Number(leadId), error: error?.message || 'unknown' });
+    setSyncStatus('Synced; To Do pending');
+  }
 }
 
 async function syncAllMeaningfulStateRemote() {

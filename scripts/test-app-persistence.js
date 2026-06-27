@@ -100,6 +100,9 @@ globalThis.__leadflowAppTest = {
   importInboxEmailWithStage,
   loadSupabaseState,
   saveStateRemote,
+  restorePinSessionFromCookie,
+  syncLeadToTodo,
+  shouldSyncLeadToTodo,
 };
 `;
   vm.runInNewContext(source, sandbox, { filename: appPath });
@@ -109,6 +112,27 @@ globalThis.__leadflowAppTest = {
 (async () => {
   const { sandbox, api, storage } = loadAppSandbox();
   const { app } = api;
+
+  console.log('\nPIN session restored from HttpOnly cookie');
+  {
+    sandbox.fetch = async (url, options = {}) => {
+      assert('checks /api/auth when local PIN session is missing', String(url) === '/api/auth', String(url));
+      assert('cookie restore uses no-store', options.cache === 'no-store', JSON.stringify(options));
+      assert('cookie restore keeps same-origin credentials', options.credentials === 'same-origin', JSON.stringify(options));
+      return {
+        ok: true,
+        json: async () => ({
+          authenticated: true,
+          token: 'cookie-token',
+          expires_at: '2026-07-27T00:00:00.000Z',
+          user: { email: 'jacquigriffin@mobilesolicitor.com.au' },
+        }),
+      };
+    };
+    const restored = await api.restorePinSessionFromCookie();
+    assert('cookie token becomes app session shape', restored.access_token === 'cookie-token' && restored.provider === 'pin', JSON.stringify(restored));
+    assert('restored cookie token is written to localStorage', JSON.parse(storage.get('leadflow-pin-session-v1') || '{}').access_token === 'cookie-token');
+  }
 
   console.log('\npipeline status from production base schema');
   {
@@ -256,6 +280,28 @@ globalThis.__leadflowAppTest = {
     assert('existing import moves UI to Closed', app.currentTab === 'closed', app.currentTab);
     assert('imported email remains suppressed after save', api.inboxEmailNeedsAction(app.inbox[0]) === false);
     assert('imported id is persisted locally as a secondary guard', JSON.parse(storage.get('xena-leads-inbox-imported') || '[]').includes('inbox-existing-1'));
+  }
+
+  console.log('\nfollow-up lead syncs to Microsoft To Do endpoint');
+  {
+    const calls = [];
+    app.config.supabase.enabled = true;
+    app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    app.leads = [{ id: 202, sender_name: 'Potential Client', status: 'new', subject: 'Parenting enquiry' }];
+    sandbox.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      assert('calls todo sync endpoint', String(url) === '/api/todo-sync', String(url));
+      const body = JSON.parse(options.body);
+      assert('todo sync sends action', body.action === 'sync-lead', JSON.stringify(body));
+      assert('todo sync sends lead details', body.lead.id === 202 && body.lead.sender_name === 'Potential Client', JSON.stringify(body));
+      assert('todo sync sends state details', body.state.prospectiveStatus === 'contacted', JSON.stringify(body));
+      return { ok: true, json: async () => ({ ok: true, configured: true, action: 'created', task: { id: 'todo-1' } }) };
+    };
+    assert('contacted status is tracked', api.shouldSyncLeadToTodo(app.leads[0], { prospectiveStatus: 'contacted' }) === true);
+    const result = await api.syncLeadToTodo(202, { prospectiveStatus: 'contacted', comment: 'Call back Monday' });
+    assert('todo sync returns result', result.action === 'created', JSON.stringify(result));
+    assert('todo sync was called once', calls.length === 1, JSON.stringify(calls));
+    assert('closed status is not tracked', api.shouldSyncLeadToTodo(app.leads[0], { prospectiveStatus: 'closed_no_response' }) === false);
   }
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

@@ -6,6 +6,7 @@ const {
   clearSessionCookie,
   verifyPin,
   verifyPinSession,
+  getCookieSessionToken,
   getSessionUser,
   SESSION_TTL_MS,
 } = require('./lib/pin-session');
@@ -41,9 +42,12 @@ module.exports = async (req, res) => {
   res.setHeader('Vary', 'Cookie');
 
   if (req.method === 'GET') {
-    const claims = verifyPinSession(req);
+    const token = getCookieSessionToken(req);
+    const claims = verifyPinSession(token);
     return res.status(200).json({
       authenticated: Boolean(claims),
+      token: claims ? token : null,
+      expires_at: claims?.exp ? new Date(claims.exp * 1000).toISOString() : null,
       user: claims ? { email: claims.email || getSessionUser() } : null,
     });
   }
