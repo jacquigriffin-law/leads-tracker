@@ -1,11 +1,29 @@
 'use strict';
 
+const { createHash } = require('crypto');
 const { verifyPinSession } = require('./lib/pin-session');
 
 const GRAPH_URL = 'https://graph.microsoft.com/v1.0';
 const TODO_LIST_NAME = 'Leads & Intake';
+const TRIAGE_LIST_NAME = 'LeadFlow - Triage Inbox';
 const MARKER_PREFIX = '[leadflow:';
 const IMPORT_MARKER_PREFIX = '[leadflow-todo-sync:';
+const TRIAGE_MARKER_PREFIX = '[leadflow-triage:';
+const TRIAGE_PAYLOAD_PREFIX = 'XENA_TRIAGE_PAYLOAD:';
+const TRIAGE_DECISIONS = [
+  'YES - prospective lead',
+  'NO - not a lead',
+  'EXISTING MATTER',
+  'DUPLICATE',
+  'CALL FIRST',
+];
+const TRIAGE_STATUS_BY_DECISION = {
+  'YES - prospective lead': 'new',
+  'NO - not a lead': 'not_a_lead',
+  'EXISTING MATTER': 'existing_matter',
+  DUPLICATE: 'closed',
+  'CALL FIRST': 'follow_up',
+};
 const TRACKED_STATUSES = new Set([
   'new',
   'follow_up',
@@ -44,6 +62,14 @@ function stripHtml(text) {
 
 function leadMarker(leadId) {
   return `${MARKER_PREFIX}${leadId}]`;
+}
+
+function triageMarker(emailId) {
+  return `${TRIAGE_MARKER_PREFIX}${sanitiseText(emailId, 160)}]`;
+}
+
+function triageLeadMarker(emailId) {
+  return `[leadflow-triage-lead:${sanitiseText(emailId, 160)}]`;
 }
 
 function importMarker(task) {
@@ -146,6 +172,16 @@ async function getTodoList(token, userId, listName = TODO_LIST_NAME) {
   return list;
 }
 
+async function getOrCreateTodoList(token, userId, listName) {
+  const data = await graphFetch(token, `/users/${userId}/todo/lists?$top=100`);
+  const list = (data.value || []).find((item) => String(item.displayName || '').trim().toLowerCase() === listName.toLowerCase());
+  if (list?.id) return list;
+  return graphFetch(token, `/users/${userId}/todo/lists`, {
+    method: 'POST',
+    body: JSON.stringify({ displayName: listName }),
+  });
+}
+
 async function getAllTasks(token, userId, listId) {
   const tasks = [];
   let endpoint = `/users/${userId}/todo/lists/${listId}/tasks?$top=200`;
@@ -157,12 +193,181 @@ async function getAllTasks(token, userId, listId) {
   return tasks;
 }
 
+async function getChecklistItems(token, userId, listId, taskId) {
+  const data = await graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${taskId}/checklistItems?$top=50`);
+  return data.value || [];
+}
+
+async function ensureDecisionChecklist(token, userId, listId, taskId) {
+  const existing = await getChecklistItems(token, userId, listId, taskId);
+  const existingNames = new Set(existing.map((item) => String(item.displayName || '').trim().toLowerCase()));
+  for (const decision of TRIAGE_DECISIONS) {
+    if (existingNames.has(decision.toLowerCase())) continue;
+    await graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${taskId}/checklistItems`, {
+      method: 'POST',
+      body: JSON.stringify({ displayName: decision }),
+    });
+  }
+}
+
 function findTaskForLead(tasks, leadId) {
   const marker = leadMarker(leadId);
   return tasks.find((task) => {
     const body = stripHtml(task.body?.content || '');
     return String(task.title || '').includes(marker) || body.includes(marker);
   }) || null;
+}
+
+function findTaskForTriage(tasks, emailId) {
+  const marker = triageMarker(emailId);
+  return tasks.find((task) => {
+    const body = stripHtml(task.body?.content || '');
+    return String(task.title || '').includes(marker) || body.includes(marker);
+  }) || null;
+}
+
+function encodeTriagePayload(email) {
+  const payload = {
+    id: sanitiseText(email.id, 120),
+    from_name: sanitiseText(email.from_name, 200),
+    from_email: sanitiseText(email.from_email, 240),
+    phone: sanitiseText(email.phone, 80),
+    subject: sanitiseText(email.subject, 240),
+    received_at: sanitiseText(email.received_at, 80),
+    snippet: sanitiseText(email.snippet, 500),
+    source_label: sanitiseText(email.source_label || email.source_account, 80),
+    source_account: sanitiseText(email.source_account || email.source_label, 80),
+  };
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodeTriagePayload(task) {
+  const body = stripHtml(task.body?.content || '');
+  const line = body.split(/\r?\n/).find((item) => item.startsWith(TRIAGE_PAYLOAD_PREFIX));
+  if (!line) return null;
+  try {
+    return JSON.parse(Buffer.from(line.slice(TRIAGE_PAYLOAD_PREFIX.length).trim(), 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function getTriageIdFromTask(task) {
+  const text = `${task.title || ''}\n${stripHtml(task.body?.content || '')}`;
+  const match = text.match(/\[leadflow-triage:([^\]]+)\]/);
+  return match ? match[1] : '';
+}
+
+function buildTriageTaskTitle(email) {
+  const source = sanitiseText(email.source_label || email.source_account || 'Inbox', 40);
+  const subject = sanitiseText(email.subject || 'possible lead', 90);
+  const name = sanitiseText(email.from_name || email.from_email || 'Unknown', 80);
+  return `TRIAGE - ${source} - ${subject} - ${name}`.replace(/\s+/g, ' ').slice(0, 240);
+}
+
+function buildTriageTaskBody(email) {
+  const emailId = sanitiseText(email.id, 120);
+  const lines = [
+    triageMarker(emailId),
+    'LeadFlow triage candidate',
+    `Source: ${sanitiseText(email.source_label || email.source_account || 'Inbox', 80)}`,
+    `From: ${sanitiseText(email.from_name || 'Unknown', 200)}`,
+  ];
+  if (email.from_email) lines.push(`Email: ${sanitiseText(email.from_email, 240)}`);
+  if (email.phone) lines.push(`Phone: ${sanitiseText(email.phone, 80)}`);
+  if (email.subject) lines.push(`Subject: ${sanitiseText(email.subject, 240)}`);
+  if (email.received_at) lines.push(`Received: ${sanitiseText(email.received_at, 80)}`);
+  if (email.snippet) lines.push('', 'Safe preview:', sanitiseText(email.snippet, 500));
+  lines.push(
+    '',
+    'Tick exactly one checklist decision. Xena will sync that decision back to LeadFlow.',
+    '',
+    `${TRIAGE_PAYLOAD_PREFIX} ${encodeTriagePayload(email)}`,
+  );
+  return lines.join('\n');
+}
+
+function buildTriageTaskPayload(email) {
+  return {
+    title: buildTriageTaskTitle(email),
+    body: { contentType: 'text', content: buildTriageTaskBody(email) },
+    importance: 'high',
+  };
+}
+
+function isDecisionChecked(item) {
+  return item.isChecked === true || item.checkedDateTime || String(item.status || '').toLowerCase() === 'completed';
+}
+
+function getCheckedDecision(checklistItems) {
+  const checked = (checklistItems || [])
+    .filter((item) => TRIAGE_DECISIONS.includes(String(item.displayName || '').trim()) && isDecisionChecked(item))
+    .map((item) => String(item.displayName || '').trim());
+  return checked.length === 1 ? checked[0] : null;
+}
+
+function decisionToLeadStatus(decision) {
+  return TRIAGE_STATUS_BY_DECISION[decision] || 'new';
+}
+
+function decisionCreatesFollowUp(decision) {
+  return decision === 'YES - prospective lead' || decision === 'CALL FIRST';
+}
+
+function leadRecordFromTriage(email, decision, id) {
+  const status = decisionToLeadStatus(decision);
+  const marker = triageLeadMarker(email.id);
+  return {
+    id,
+    sender_name: sanitiseText(email.from_name || email.from_email || 'Unknown lead', 200) || 'Unknown lead',
+    sender_email: sanitiseText(email.from_email, 240),
+    sender_phone: sanitiseText(email.phone, 80),
+    source_account: sanitiseText(email.source_account || email.source_label || 'LeadFlow Inbox', 120),
+    source_platform: 'To Do triage',
+    source_rule: `${marker} Microsoft To Do decision: ${decision}`,
+    subject: sanitiseText(email.subject || 'Inbox lead triage', 240),
+    date_received: sanitiseText(email.received_at, 80) || new Date().toISOString(),
+    priority: decision === 'CALL FIRST' ? 'HIGH' : 'MEDIUM',
+    status,
+    raw_preview: sanitiseText(email.snippet, 1000),
+    notes: [
+      marker,
+      `Triage decision from Microsoft To Do: ${decision}`,
+      email.snippet ? `Safe preview: ${sanitiseText(email.snippet, 500)}` : '',
+    ].filter(Boolean).join('\n'),
+    next_action: decisionCreatesFollowUp(decision) ? (decision === 'CALL FIRST' ? 'Call first before classifying.' : 'Follow up as prospective lead.') : null,
+  };
+}
+
+async function syncInboxTriage({ token, userId, listId, candidates }) {
+  const safeCandidates = Array.isArray(candidates) ? candidates.slice(0, 100).filter((email) => email?.id) : [];
+  const tasks = await getAllTasks(token, userId, listId);
+  const results = [];
+
+  for (const email of safeCandidates) {
+    const existing = findTaskForTriage(tasks, email.id);
+    const payload = buildTriageTaskPayload(email);
+    let task;
+    let action;
+    if (existing?.id) {
+      task = await graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${existing.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      action = 'updated';
+    } else {
+      task = await graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      tasks.push(task);
+      action = 'created';
+    }
+    await ensureDecisionChecklist(token, userId, listId, task.id);
+    results.push({ inbox_id: String(email.id), task_id: task.id, action });
+  }
+
+  return { ok: true, configured: true, list: TRIAGE_LIST_NAME, results };
 }
 
 function buildTaskTitle(lead, state) {
@@ -247,7 +452,7 @@ async function supabaseFetch(path, options = {}) {
 }
 
 async function loadLeads() {
-  const response = await supabaseFetch('leads?select=id,sender_name,sender_email,sender_phone,subject,matter_type,priority,status,notes,location,opposing_party,next_action&order=date_received.desc');
+  const response = await supabaseFetch('leads?select=id,source_account,date_received,sender_name,sender_email,sender_phone,subject,source_rule,source_platform,matter_type,priority,status,notes,raw_preview,location,opposing_party,next_action&order=date_received.desc');
   if (!response.ok) throw new Error(`Supabase leads read failed ${response.status}`);
   return response.json();
 }
@@ -292,6 +497,83 @@ async function saveComment(leadId, comment, states) {
   return response.json();
 }
 
+function triageCoreFlags(decision) {
+  if (decision === 'NO - not a lead' || decision === 'EXISTING MATTER' || decision === 'DUPLICATE') {
+    return { actioned: true, leap: false, no_action: true, la_accepted: false };
+  }
+  return { actioned: false, leap: false, no_action: false, la_accepted: false };
+}
+
+async function saveTriageState(leadId, decision, task, states) {
+  const userId = await resolveStateUserId(leadId, states);
+  if (!userId) {
+    const error = new Error('Lead state user is not configured.');
+    error.statusCode = 503;
+    throw error;
+  }
+  const existing = (states || []).find((state) => String(state.lead_id) === String(leadId)) || {};
+  const marker = `[leadflow-triage-decision:${task.id}:${decision}]`;
+  const currentComment = sanitiseText(existing.comment || '', 10000);
+  const note = [
+    marker,
+    `Microsoft To Do triage decision: ${decision}`,
+    `LeadFlow status stored: ${decisionToLeadStatus(decision)}`,
+    `Triage task completed: ${task.title || task.id}`,
+  ].join('\n');
+  const flags = triageCoreFlags(decision);
+  const payload = {
+    lead_id: Number(leadId),
+    user_id: userId,
+    ...flags,
+    comment: currentComment.includes(marker)
+      ? currentComment
+      : [currentComment, note].filter(Boolean).join('\n\n---\n\n').slice(0, 10000),
+  };
+  const response = await supabaseFetch('lead_states?on_conflict=user_id,lead_id', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=representation,resolution=merge-duplicates' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Supabase triage state write failed ${response.status}`);
+  return response.json();
+}
+
+function findExistingTriageLead(leads, email) {
+  const marker = triageLeadMarker(email.id);
+  const fromEmail = String(email.from_email || '').trim().toLowerCase();
+  const subject = String(email.subject || '').trim().toLowerCase().replace(/^(re|fw|fwd)\s*:\s*/i, '');
+  return (leads || []).find((lead) => {
+    const text = `${lead.source_rule || ''}\n${lead.notes || ''}\n${lead.raw_preview || ''}`;
+    const leadEmail = String(lead.sender_email || '').trim().toLowerCase();
+    const leadSubject = String(lead.subject || '').trim().toLowerCase().replace(/^(re|fw|fwd)\s*:\s*/i, '');
+    return text.includes(marker) || (fromEmail && subject && leadEmail === fromEmail && leadSubject === subject);
+  }) || null;
+}
+
+async function upsertTriageLead(email, decision, leads, sequence = 0) {
+  const existing = findExistingTriageLead(leads, email);
+  const id = existing?.id || (stableTriageLeadId(email.id) + sequence);
+  const record = leadRecordFromTriage(email, decision, id);
+  const path = existing?.id
+    ? `leads?id=eq.${encodeURIComponent(String(existing.id))}`
+    : 'leads?on_conflict=id';
+  const method = existing?.id ? 'PATCH' : 'POST';
+  const response = await supabaseFetch(path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Prefer: existing?.id ? 'return=representation' : 'return=representation,resolution=merge-duplicates',
+    },
+    body: JSON.stringify(record),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Supabase triage lead write failed ${response.status}: ${text.slice(0, 200)}`);
+  }
+  const rows = await response.json();
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
 function buildImportedNote(task) {
   const body = stripHtml(task.body?.content || '');
   return [
@@ -320,6 +602,54 @@ async function pullTodoUpdates({ token, userId, listId }) {
     const nextComment = [currentComment, buildImportedNote(task)].filter(Boolean).join('\n\n---\n\n').slice(0, 10000);
     await saveComment(lead.id, nextComment, states);
     results.push({ lead_id: lead.id, task_id: task.id, action: 'comment_appended' });
+  }
+
+  return { ok: true, configured: true, results };
+}
+
+async function pullTriageDecisions({ token, userId, triageListId, intakeListId }) {
+  const [leads, states, tasks] = await Promise.all([loadLeads(), loadStates(), getAllTasks(token, userId, triageListId)]);
+  const results = [];
+  let sequence = 0;
+
+  for (const task of tasks || []) {
+    if (String(task.status || '').toLowerCase() === 'completed') continue;
+    const emailId = getTriageIdFromTask(task);
+    if (!emailId) continue;
+    const checklist = await getChecklistItems(token, userId, triageListId, task.id);
+    const decision = getCheckedDecision(checklist);
+    if (!decision) {
+      const checkedCount = (checklist || []).filter((item) => TRIAGE_DECISIONS.includes(String(item.displayName || '').trim()) && isDecisionChecked(item)).length;
+      if (checkedCount > 1) results.push({ task_id: task.id, action: 'skipped', reason: 'multiple decisions checked' });
+      continue;
+    }
+    const email = decodeTriagePayload(task) || { id: emailId, subject: task.title, snippet: stripHtml(task.body?.content || '').slice(0, 500) };
+    email.id = email.id || emailId;
+    const lead = await upsertTriageLead(email, decision, leads, sequence++);
+    leads.push(lead);
+    await saveTriageState(lead.id, decision, task, states);
+    let followUpTask = null;
+    if (decisionCreatesFollowUp(decision)) {
+      const state = {
+        prospectiveStatus: decisionToLeadStatus(decision),
+        comment: `Created from To Do triage decision: ${decision}`,
+      };
+      const synced = await upsertLeadTask({ token, userId, listId: intakeListId, lead, state });
+      followUpTask = synced.task?.id || null;
+    }
+    await graphFetch(token, `/users/${userId}/todo/lists/${triageListId}/tasks/${task.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'completed' }),
+    });
+    results.push({
+      inbox_id: emailId,
+      lead_id: lead.id,
+      task_id: task.id,
+      decision,
+      status: decisionToLeadStatus(decision),
+      action: 'synced',
+      follow_up_task_id: followUpTask,
+    });
   }
 
   return { ok: true, configured: true, results };
@@ -356,15 +686,34 @@ module.exports = async (req, res) => {
   try {
     const token = await getGraphToken();
     const userId = await getUserId(token);
-    const list = await getTodoList(token, userId, TODO_LIST_NAME);
     const action = body.action || 'sync-lead';
 
     if (action === 'pull-task-notes') {
+      const list = await getTodoList(token, userId, TODO_LIST_NAME);
       const result = await pullTodoUpdates({ token, userId, listId: list.id });
       audit('todo_sync.pull_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
       return res.status(200).json(result);
     }
 
+    if (action === 'sync-inbox-triage') {
+      const emails = Array.isArray(body.candidates) ? body.candidates : (Array.isArray(body.emails) ? body.emails : []);
+      const triageList = await getOrCreateTodoList(token, userId, TRIAGE_LIST_NAME);
+      const result = await syncInboxTriage({ token, userId, listId: triageList.id, candidates: emails });
+      audit('todo_sync.triage_upsert_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
+      return res.status(200).json(result);
+    }
+
+    if (action === 'pull-triage-decisions') {
+      const [triageList, intakeList] = await Promise.all([
+        getOrCreateTodoList(token, userId, TRIAGE_LIST_NAME),
+        getTodoList(token, userId, TODO_LIST_NAME),
+      ]);
+      const result = await pullTriageDecisions({ token, userId, triageListId: triageList.id, intakeListId: intakeList.id });
+      audit('todo_sync.triage_pull_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
+      return res.status(200).json(result);
+    }
+
+    const list = await getTodoList(token, userId, TODO_LIST_NAME);
     const result = await upsertLeadTask({ token, userId, listId: list.id, lead: body.lead || {}, state: body.state || {} });
     audit('todo_sync.upsert_ok', { ip, user: claims.email || 'pin-session', action: result.action || 'skipped', lead_id: body.lead?.id || null });
     return res.status(200).json(result);
@@ -377,12 +726,23 @@ module.exports = async (req, res) => {
 
 module.exports._test = {
   TODO_LIST_NAME,
+  TRIAGE_LIST_NAME,
+  TRIAGE_DECISIONS,
   TRACKED_STATUSES,
   buildTaskBody,
   buildTaskPayload,
+  buildTriageTaskBody,
+  buildTriageTaskPayload,
+  decodeTriagePayload,
+  decisionCreatesFollowUp,
+  decisionToLeadStatus,
   findTaskForLead,
+  findTaskForTriage,
   getEffectiveStatus,
+  getCheckedDecision,
   leadMarker,
+  leadRecordFromTriage,
   shouldSyncLead,
   stripHtml,
+  triageMarker,
 };

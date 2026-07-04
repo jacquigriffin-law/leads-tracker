@@ -102,6 +102,8 @@ globalThis.__leadflowAppTest = {
   saveStateRemote,
   restorePinSessionFromCookie,
   syncLeadToTodo,
+  syncInboxTriageToTodo,
+  pullTodoTriageDecisions,
   shouldSyncLeadToTodo,
 };
 `;
@@ -302,6 +304,69 @@ globalThis.__leadflowAppTest = {
     assert('todo sync returns result', result.action === 'created', JSON.stringify(result));
     assert('todo sync was called once', calls.length === 1, JSON.stringify(calls));
     assert('closed status is not tracked', api.shouldSyncLeadToTodo(app.leads[0], { prospectiveStatus: 'closed_no_response' }) === false);
+  }
+
+  console.log('\ninbox triage sync uses Microsoft To Do endpoint');
+  {
+    const calls = [];
+    app.config.supabase.enabled = true;
+    app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    app.leads = [{ id: 303, sender_email: 'saved@example.com', subject: 'Already saved', status: 'new' }];
+    app.inbox = [
+      {
+        id: 'jgms-triage-1',
+        from_name: 'Possible Client',
+        from_email: 'possible@example.com',
+        subject: 'Need advice',
+        snippet: 'I need help with a family law issue.',
+        source_label: 'JGMS',
+        source_account: 'JGMS',
+      },
+      {
+        id: 'jgms-triage-dismissed',
+        from_name: 'Dismissed Client',
+        from_email: 'dismissed@example.com',
+        subject: 'Dismissed lead',
+        snippet: 'Short preview.',
+      },
+      {
+        id: 'jgms-triage-saved',
+        from_name: 'Saved Client',
+        from_email: 'saved@example.com',
+        subject: 'Already saved',
+        snippet: 'Short preview.',
+      },
+    ];
+    app.inboxDismissed = new Set(['jgms-triage-dismissed']);
+    app.inboxImported = new Set();
+    sandbox.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      assert('calls todo sync endpoint for triage', String(url) === '/api/todo-sync', String(url));
+      const body = JSON.parse(options.body);
+      assert('todo triage sync sends action', body.action === 'sync-inbox-triage', JSON.stringify(body));
+      assert('todo triage sync sends actionable inbox candidate only', body.candidates.length === 1 && body.candidates[0].id === 'jgms-triage-1', JSON.stringify(body));
+      return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'created' }] }) };
+    };
+    const result = await api.syncInboxTriageToTodo();
+    assert('triage sync returns result', result.results[0].action === 'created', JSON.stringify(result));
+    assert('triage sync was called once', calls.length === 1, JSON.stringify(calls));
+  }
+
+  console.log('\nTo Do triage decision pull uses Microsoft To Do endpoint');
+  {
+    const calls = [];
+    app.config.supabase.enabled = true;
+    app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    sandbox.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      assert('calls todo sync endpoint for decision pull', String(url) === '/api/todo-sync', String(url));
+      const body = JSON.parse(options.body);
+      assert('todo triage pull sends action', body.action === 'pull-triage-decisions', JSON.stringify(body));
+      return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'synced', lead_id: 303 }] }) };
+    };
+    const result = await api.pullTodoTriageDecisions();
+    assert('triage pull returns result', result.results[0].action === 'synced', JSON.stringify(result));
+    assert('triage pull was called once', calls.length === 1, JSON.stringify(calls));
   }
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

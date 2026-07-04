@@ -56,5 +56,45 @@ console.log('\nTask matching and status filter');
   assert('closed no response should not sync', todoSync.shouldSyncLead({ status: 'new' }, { prospectiveStatus: 'closed_no_response' }) === false);
 }
 
+console.log('\nInbox triage task payload and decisions');
+{
+  const email = {
+    id: 'jgms-abc123',
+    from_name: 'Sarah Sample',
+    from_email: 'sarah@example.com',
+    phone: '0400 111 222',
+    subject: 'Need help with parenting matter',
+    received_at: '2026-07-04T09:00:00.000Z',
+    snippet: 'I need legal help with a parenting dispute.',
+    source_label: 'JGMS',
+    source_account: 'JGMS',
+  };
+  const payload = todoSync.buildTriageTaskPayload(email);
+  assert('triage task title starts with TRIAGE', payload.title.startsWith('TRIAGE - JGMS'), payload.title);
+  assert('triage body includes marker', payload.body.content.includes('[leadflow-triage:jgms-abc123]'), payload.body.content);
+  assert('triage body includes payload marker', payload.body.content.includes('XENA_TRIAGE_PAYLOAD:'), payload.body.content);
+  const decoded = todoSync.decodeTriagePayload({ body: payload.body });
+  assert('triage payload decodes safely', decoded.id === 'jgms-abc123' && decoded.snippet.includes('parenting'), JSON.stringify(decoded));
+  assert('finds triage task by marker', todoSync.findTaskForTriage([{ id: 't1', title: payload.title, body: payload.body }], 'jgms-abc123').id === 't1');
+  assert('YES maps to new lead', todoSync.decisionToLeadStatus('YES - prospective lead') === 'new');
+  assert('CALL FIRST maps to follow_up', todoSync.decisionToLeadStatus('CALL FIRST') === 'follow_up');
+  assert('NO maps to not_a_lead', todoSync.decisionToLeadStatus('NO - not a lead') === 'not_a_lead');
+  assert('CALL FIRST creates follow-up', todoSync.decisionCreatesFollowUp('CALL FIRST') === true);
+  assert('NO does not create follow-up', todoSync.decisionCreatesFollowUp('NO - not a lead') === false);
+  const decision = todoSync.getCheckedDecision([
+    { displayName: 'YES - prospective lead', isChecked: true },
+    { displayName: 'NO - not a lead', isChecked: false },
+  ]);
+  assert('reads exactly one checked decision', decision === 'YES - prospective lead', decision);
+  const duplicateDecision = todoSync.getCheckedDecision([
+    { displayName: 'YES - prospective lead', isChecked: true },
+    { displayName: 'NO - not a lead', isChecked: true },
+  ]);
+  assert('ignores ambiguous checked decisions', duplicateDecision === null, duplicateDecision);
+  const leadRecord = todoSync.leadRecordFromTriage(email, 'CALL FIRST', 456);
+  assert('triage lead record stores To Do source', leadRecord.id === 456 && leadRecord.source_platform === 'To Do triage', JSON.stringify(leadRecord));
+  assert('triage lead record stores next action', leadRecord.status === 'follow_up' && leadRecord.next_action.includes('Call first'), JSON.stringify(leadRecord));
+}
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

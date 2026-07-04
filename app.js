@@ -839,6 +839,40 @@ async function pullTodoNotesToLeadflow() {
   return body;
 }
 
+async function syncInboxTriageToTodo() {
+  if (!(app.session && isSupabaseEnabled()) || !Array.isArray(app.inbox) || app.inbox.length === 0) return null;
+  const candidates = app.inbox
+    .filter((email) => inboxEmailNeedsAction(email) && !app.inboxDismissed.has(String(email.id)))
+    .slice(0, 25);
+  if (!candidates.length) return null;
+  const response = await fetchWithTimeout('/api/todo-sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${app.session.access_token}`,
+    },
+    body: JSON.stringify({ action: 'sync-inbox-triage', candidates }),
+  }, 20000);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `To Do triage sync error ${response.status}`);
+  return body;
+}
+
+async function pullTodoTriageDecisions() {
+  if (!(app.session && isSupabaseEnabled())) return null;
+  const response = await fetchWithTimeout('/api/todo-sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${app.session.access_token}`,
+    },
+    body: JSON.stringify({ action: 'pull-triage-decisions' }),
+  }, 25000);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `To Do triage pull error ${response.status}`);
+  return body;
+}
+
 async function handleAddLeadSubmit(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   const name = String(data.name || '').trim();
@@ -2363,6 +2397,21 @@ async function hydrate() {
       }
     } catch (error) {
       clientAudit('todo.pull_error', { error: error?.message || 'unknown' });
+    }
+    try {
+      const triagePull = await pullTodoTriageDecisions();
+      if (triagePull?.results?.some((item) => item.action === 'synced')) {
+        await loadLeads();
+        await loadSupabaseState();
+        await loadInbox();
+      }
+    } catch (error) {
+      clientAudit('todo.triage_pull_error', { error: error?.message || 'unknown' });
+    }
+    try {
+      await syncInboxTriageToTodo();
+    } catch (error) {
+      clientAudit('todo.triage_sync_error', { error: error?.message || 'unknown' });
     }
     await syncAllMeaningfulStateRemote();
   }
