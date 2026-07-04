@@ -139,6 +139,7 @@ const app = {
   pinSigningIn: false,
   todoNotesPulled: false,
   todoTriageSyncing: false,
+  todoTriageLastSignature: '',
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -846,6 +847,11 @@ async function syncInboxTriageToTodo() {
     .filter((email) => inboxEmailNeedsAction(email) && !app.inboxDismissed.has(String(email.id)))
     .slice(0, 25);
   if (!candidates.length) return null;
+  const signature = candidates
+    .map((email) => [email.id, email.subject, email.received_at, email.snippet].join('|'))
+    .sort()
+    .join('\n');
+  if (signature === app.todoTriageLastSignature) return null;
   const response = await fetchWithTimeout('/api/todo-sync', {
     method: 'POST',
     headers: {
@@ -856,6 +862,7 @@ async function syncInboxTriageToTodo() {
   }, 20000);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `To Do triage sync error ${response.status}`);
+  app.todoTriageLastSignature = signature;
   return body;
 }
 
@@ -881,6 +888,7 @@ async function syncTodoTriageAfterInboxLoad() {
     const triagePull = await pullTodoTriageDecisions();
     if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
       await loadLeads();
+      mergeManualLeadsIntoApp();
       await loadSupabaseState();
     }
     await syncInboxTriageToTodo();
@@ -2424,6 +2432,7 @@ async function hydrate() {
       const triagePull = await pullTodoTriageDecisions();
       if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
         await loadLeads();
+        mergeManualLeadsIntoApp();
         await loadSupabaseState();
         await loadInbox();
       }

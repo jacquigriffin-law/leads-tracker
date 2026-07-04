@@ -303,7 +303,9 @@ function getCheckedDecision(checklistItems) {
   const checked = (checklistItems || [])
     .filter((item) => TRIAGE_DECISIONS.includes(String(item.displayName || '').trim()) && isDecisionChecked(item))
     .map((item) => String(item.displayName || '').trim());
-  return checked.length === 1 ? checked[0] : null;
+  if (!checked.length) return null;
+  if (checked.length > 1) return { decision: null, multiple: true, checked };
+  return { decision: checked[0], multiple: false, checked };
 }
 
 function decisionToLeadStatus(decision) {
@@ -607,22 +609,23 @@ async function pullTodoUpdates({ token, userId, listId }) {
   return { ok: true, configured: true, results };
 }
 
-async function pullTriageDecisions({ token, userId, triageListId, intakeListId }) {
+async function pullTriageDecisions({ token, userId, triageListId }) {
   const [leads, states, tasks] = await Promise.all([loadLeads(), loadStates(), getAllTasks(token, userId, triageListId)]);
   const results = [];
   let sequence = 0;
+  let intakeList = null;
 
   for (const task of tasks || []) {
     if (String(task.status || '').toLowerCase() === 'completed') continue;
     const emailId = getTriageIdFromTask(task);
     if (!emailId) continue;
     const checklist = await getChecklistItems(token, userId, triageListId, task.id);
-    const decision = getCheckedDecision(checklist);
-    if (!decision) {
-      const checkedCount = (checklist || []).filter((item) => TRIAGE_DECISIONS.includes(String(item.displayName || '').trim()) && isDecisionChecked(item)).length;
-      if (checkedCount > 1) results.push({ task_id: task.id, action: 'skipped', reason: 'multiple decisions checked' });
+    const checked = getCheckedDecision(checklist);
+    if (!checked?.decision) {
+      if (checked?.multiple) results.push({ task_id: task.id, inbox_id: emailId, action: 'skipped', reason: 'multiple decisions checked' });
       continue;
     }
+    const decision = checked.decision;
     const email = decodeTriagePayload(task) || { id: emailId, subject: task.title, snippet: stripHtml(task.body?.content || '').slice(0, 500) };
     email.id = email.id || emailId;
     const lead = await upsertTriageLead(email, decision, leads, sequence++);
@@ -630,11 +633,12 @@ async function pullTriageDecisions({ token, userId, triageListId, intakeListId }
     await saveTriageState(lead.id, decision, task, states);
     let followUpTask = null;
     if (decisionCreatesFollowUp(decision)) {
+      if (!intakeList) intakeList = await getTodoList(token, userId, TODO_LIST_NAME);
       const state = {
         prospectiveStatus: decisionToLeadStatus(decision),
         comment: `Created from To Do triage decision: ${decision}`,
       };
-      const synced = await upsertLeadTask({ token, userId, listId: intakeListId, lead, state });
+      const synced = await upsertLeadTask({ token, userId, listId: intakeList.id, lead, state });
       followUpTask = synced.task?.id || null;
     }
     await graphFetch(token, `/users/${userId}/todo/lists/${triageListId}/tasks/${task.id}`, {
@@ -704,11 +708,8 @@ module.exports = async (req, res) => {
     }
 
     if (action === 'pull-triage-decisions') {
-      const [triageList, intakeList] = await Promise.all([
-        getOrCreateTodoList(token, userId, TRIAGE_LIST_NAME),
-        getTodoList(token, userId, TODO_LIST_NAME),
-      ]);
-      const result = await pullTriageDecisions({ token, userId, triageListId: triageList.id, intakeListId: intakeList.id });
+      const triageList = await getOrCreateTodoList(token, userId, TRIAGE_LIST_NAME);
+      const result = await pullTriageDecisions({ token, userId, triageListId: triageList.id });
       audit('todo_sync.triage_pull_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
       return res.status(200).json(result);
     }
