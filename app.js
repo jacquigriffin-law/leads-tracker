@@ -138,6 +138,7 @@ const app = {
   aiTriageLoading: new Set(),
   pinSigningIn: false,
   todoNotesPulled: false,
+  todoTriageSyncing: false,
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -873,6 +874,22 @@ async function pullTodoTriageDecisions() {
   return body;
 }
 
+async function syncTodoTriageAfterInboxLoad() {
+  if (!(app.session && isSupabaseEnabled()) || app.todoTriageSyncing) return null;
+  app.todoTriageSyncing = true;
+  try {
+    const triagePull = await pullTodoTriageDecisions();
+    if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
+      await loadLeads();
+      await loadSupabaseState();
+    }
+    await syncInboxTriageToTodo();
+    return triagePull;
+  } finally {
+    app.todoTriageSyncing = false;
+  }
+}
+
 async function handleAddLeadSubmit(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   const name = String(data.name || '').trim();
@@ -1261,6 +1278,11 @@ async function loadInbox() {
   // Keep hero tile + tab badge counts fresh even when not re-rendering the lead list
   updateTabCounts();
   updateSummary();
+  if (app.inboxLive && app.session) {
+    syncTodoTriageAfterInboxLoad().catch((error) => {
+      clientAudit('todo.triage_inbox_path_error', { error: error?.message || 'unknown' });
+    });
+  }
 }
 
 function persistInboxImported() {
@@ -2400,7 +2422,7 @@ async function hydrate() {
     }
     try {
       const triagePull = await pullTodoTriageDecisions();
-      if (triagePull?.results?.some((item) => item.action === 'synced')) {
+      if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
         await loadLeads();
         await loadSupabaseState();
         await loadInbox();

@@ -362,10 +362,10 @@ globalThis.__leadflowAppTest = {
       assert('calls todo sync endpoint for decision pull', String(url) === '/api/todo-sync', String(url));
       const body = JSON.parse(options.body);
       assert('todo triage pull sends action', body.action === 'pull-triage-decisions', JSON.stringify(body));
-      return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'synced', lead_id: 303 }] }) };
+      return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'decision_imported', lead_id: 303 }] }) };
     };
     const result = await api.pullTodoTriageDecisions();
-    assert('triage pull returns result', result.results[0].action === 'synced', JSON.stringify(result));
+    assert('triage pull returns result', result.results[0].action === 'decision_imported', JSON.stringify(result));
     assert('triage pull was called once', calls.length === 1, JSON.stringify(calls));
   }
 
