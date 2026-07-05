@@ -104,6 +104,9 @@ globalThis.__leadflowAppTest = {
   syncLeadToTodo,
   syncInboxTriageToTodo,
   pullTodoTriageDecisions,
+  runTodoTriageBackground,
+  getTodoTriageSignature,
+  shouldQueueTodoTriage,
   shouldSyncLeadToTodo,
 };
 `;
@@ -350,6 +353,59 @@ globalThis.__leadflowAppTest = {
     const result = await api.syncInboxTriageToTodo();
     assert('triage sync returns result', result.results[0].action === 'created', JSON.stringify(result));
     assert('triage sync was called once', calls.length === 1, JSON.stringify(calls));
+    const skipped = await api.syncInboxTriageToTodo();
+    assert('unchanged triage signature does not call To Do again', skipped === null && calls.length === 1, JSON.stringify(skipped));
+    app.todoTriageLastSignature = '';
+    app.todoTriageLastSyncAt = Date.now();
+    const throttled = await api.syncInboxTriageToTodo();
+    assert('changed triage sync is throttled inside interval', throttled?.reason === 'todo_triage_sync_throttled' && calls.length === 1, JSON.stringify(throttled));
+    app.todoTriageLastSyncAt = 0;
+  }
+
+  console.log('\nTo Do triage background skips unchanged inbox signature');
+  {
+    const calls = [];
+    app.config.supabase.enabled = true;
+    app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    app.leads = [];
+    app.inbox = [{
+      id: 'jgms-triage-stable',
+      from_name: 'Stable Client',
+      from_email: 'stable@example.com',
+      subject: 'Family law help',
+      snippet: 'I need some advice please.',
+      source_label: 'JGMS',
+      source_account: 'JGMS',
+    }];
+    app.inboxDismissed = new Set();
+    app.inboxImported = new Set();
+    app.todoTriageLastSignature = '';
+    app.todoTriageLastInboxSignature = '';
+    app.todoTriageLastInboxSignatureAt = 0;
+    app.todoTriageLastPullAt = 0;
+    app.todoTriageLastSyncAt = 0;
+    app.todoTriageBackoffUntil = 0;
+    app.todoTriageSyncing = false;
+    sandbox.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      const body = JSON.parse(options.body);
+      if (body.action === 'pull-triage-decisions') {
+        return { ok: true, json: async () => ({ ok: true, configured: true, results: [] }) };
+      }
+      if (body.action === 'sync-inbox-triage') {
+        return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'created' }] }) };
+      }
+      throw new Error(`Unexpected action ${body.action}`);
+    };
+    const signature = api.getTodoTriageSignature();
+    assert('stable signature queues before first background run', api.shouldQueueTodoTriage(signature) === true);
+    const first = await api.runTodoTriageBackground(signature);
+    assert('first background run syncs triage', first.results[0].action === 'created', JSON.stringify(first));
+    assert('first background run pulled and synced once', calls.length === 2, JSON.stringify(calls.map((call) => JSON.parse(call.options.body).action)));
+    assert('unchanged signature does not queue immediately', api.shouldQueueTodoTriage(signature) === false);
+    const second = await api.runTodoTriageBackground(signature);
+    assert('second unchanged background run is skipped', second.reason === 'todo_triage_signature_unchanged', JSON.stringify(second));
+    assert('unchanged background run made no extra API calls', calls.length === 2, JSON.stringify(calls));
   }
 
   console.log('\nTo Do triage decision pull uses Microsoft To Do endpoint');
@@ -357,6 +413,7 @@ globalThis.__leadflowAppTest = {
     const calls = [];
     app.config.supabase.enabled = true;
     app.session = { access_token: 'pin-session', user: { email: 'pin-session' } };
+    app.todoTriageLastPullAt = 0;
     sandbox.fetch = async (url, options = {}) => {
       calls.push({ url: String(url), options });
       assert('calls todo sync endpoint for decision pull', String(url) === '/api/todo-sync', String(url));
@@ -367,6 +424,24 @@ globalThis.__leadflowAppTest = {
     const result = await api.pullTodoTriageDecisions();
     assert('triage pull returns result', result.results[0].action === 'decision_imported', JSON.stringify(result));
     assert('triage pull was called once', calls.length === 1, JSON.stringify(calls));
+    const throttled = await api.pullTodoTriageDecisions();
+    assert('triage decision pull is throttled after success', throttled?.reason === 'todo_triage_pull_throttled' && calls.length === 1, JSON.stringify(throttled));
+    app.todoTriageLastPullAt = 0;
+  }
+
+  console.log('\nTo Do triage candidate signature is stable');
+  {
+    app.inbox = [
+      { id: 'b', subject: 'Second', received_at: '2026-07-05T01:00:00Z', snippet: 'B' },
+      { id: 'a', subject: 'First', received_at: '2026-07-05T00:00:00Z', snippet: 'A' },
+    ];
+    app.inboxDismissed = new Set();
+    app.inboxImported = new Set();
+    app.leads = [];
+    const one = api.getTodoTriageSignature();
+    app.inbox.reverse();
+    const two = api.getTodoTriageSignature();
+    assert('signature is independent of inbox order', one === two && one.includes('a|First'), `${one} / ${two}`);
   }
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

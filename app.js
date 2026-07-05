@@ -17,7 +17,7 @@ const DEFAULT_CONFIG = {
 };
 const INBOX_POLL_MS = 45_000;
 const INBOX_API_TIMEOUT_MS = 20000;
-// Microsoft To Do sync is slow and best-effort — throttle aggressively and never
+// Microsoft To Do sync is slow and best-effort - throttle aggressively and never
 // block hydrate/inbox rendering on it.
 const TODO_TRIAGE_PULL_MIN_INTERVAL_MS = 10 * 60_000;
 const TODO_TRIAGE_SYNC_MIN_INTERVAL_MS = 3 * 60_000;
@@ -858,17 +858,31 @@ async function pullTodoNotesToLeadflow() {
   return body;
 }
 
-async function syncInboxTriageToTodo() {
-  if (!(app.session && isSupabaseEnabled()) || !Array.isArray(app.inbox) || app.inbox.length === 0) return null;
-  if (Date.now() < app.todoTriageBackoffUntil) return { skipped: true, reason: 'todo_triage_backoff' };
-  const candidates = app.inbox
+function getTodoTriageCandidates() {
+  if (!Array.isArray(app.inbox) || app.inbox.length === 0) return [];
+  return app.inbox
     .filter((email) => inboxEmailNeedsAction(email) && !app.inboxDismissed.has(String(email.id)))
     .slice(0, 25);
-  if (!candidates.length) return null;
-  const signature = candidates
+}
+
+function getTodoTriageSignature(candidates = getTodoTriageCandidates()) {
+  return candidates
     .map((email) => [email.id, email.subject, email.received_at, email.snippet].join('|'))
     .sort()
     .join('\n');
+}
+
+function shouldQueueTodoTriage(signature, now = Date.now()) {
+  if (!(app.session && isSupabaseEnabled()) || !signature) return false;
+  if (now < app.todoTriageBackoffUntil) return false;
+  if (signature !== app.todoTriageLastInboxSignature) return true;
+  return now - app.todoTriageLastInboxSignatureAt >= TODO_TRIAGE_UNCHANGED_RECHECK_MS;
+}
+
+async function syncInboxTriageToTodo(candidates = getTodoTriageCandidates()) {
+  if (!(app.session && isSupabaseEnabled()) || !candidates.length) return null;
+  if (Date.now() < app.todoTriageBackoffUntil) return { skipped: true, reason: 'todo_triage_backoff' };
+  const signature = getTodoTriageSignature(candidates);
   if (signature === app.todoTriageLastSignature) return null;
   if (Date.now() - app.todoTriageLastSyncAt < TODO_TRIAGE_SYNC_MIN_INTERVAL_MS) {
     return { skipped: true, reason: 'todo_triage_sync_throttled' };
@@ -908,12 +922,19 @@ async function pullTodoTriageDecisions() {
   return body;
 }
 
-async function syncTodoTriageAfterInboxLoad() {
+async function runTodoTriageBackground(expectedSignature = '') {
   if (!(app.session && isSupabaseEnabled()) || app.todoTriageSyncing) return null;
   if (Date.now() < app.todoTriageBackoffUntil) return { skipped: true, reason: 'todo_triage_backoff' };
+  const candidates = getTodoTriageCandidates();
+  const signature = getTodoTriageSignature(candidates);
+  if (!signature) return null;
+  if (expectedSignature && signature !== expectedSignature) return { skipped: true, reason: 'todo_triage_stale_signature' };
+  if (!shouldQueueTodoTriage(signature)) return { skipped: true, reason: 'todo_triage_signature_unchanged' };
   app.todoTriageSyncing = true;
   let triagePull = null;
   try {
+    app.todoTriageLastInboxSignature = signature;
+    app.todoTriageLastInboxSignatureAt = Date.now();
     triagePull = await pullTodoTriageDecisions();
     if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
       await Promise.race([
@@ -925,7 +946,11 @@ async function syncTodoTriageAfterInboxLoad() {
         new Promise((_, reject) => setTimeout(() => reject(new Error('To Do triage refresh timeout')), TODO_TRIAGE_REFRESH_TIMEOUT_MS)),
       ]);
     }
-    const triageSync = await syncInboxTriageToTodo();
+    const triageSync = await syncInboxTriageToTodo(candidates);
+    if (triageSync?.reason === 'todo_triage_sync_throttled') {
+      app.todoTriageLastInboxSignature = '';
+      app.todoTriageLastInboxSignatureAt = 0;
+    }
     app.todoTriageBackoffStep = 0;
     app.todoTriageBackoffUntil = 0;
     return triageSync || triagePull;
@@ -941,6 +966,27 @@ async function syncTodoTriageAfterInboxLoad() {
   } finally {
     app.todoTriageSyncing = false;
   }
+}
+
+function scheduleTodoTriageAfterInboxLoad() {
+  const signature = getTodoTriageSignature();
+  if (!shouldQueueTodoTriage(signature)) return null;
+  app.todoTriageQueuedSignature = signature;
+  if (app.todoTriageDebounceTimer) clearTimeout(app.todoTriageDebounceTimer);
+  const run = () => {
+    app.todoTriageDebounceTimer = null;
+    runTodoTriageBackground(signature).catch((error) => {
+      clientAudit('todo.triage_inbox_path_error', { error: error?.message || 'unknown' });
+    });
+  };
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    app.todoTriageDebounceTimer = window.setTimeout(() => {
+      window.requestIdleCallback(run, { timeout: TODO_TRIAGE_TIMEOUT_MS });
+    }, TODO_TRIAGE_DEBOUNCE_MS);
+  } else {
+    app.todoTriageDebounceTimer = setTimeout(run, TODO_TRIAGE_DEBOUNCE_MS);
+  }
+  return { queued: true, signature };
 }
 
 async function handleAddLeadSubmit(form) {
@@ -1332,9 +1378,16 @@ async function loadInbox() {
   updateTabCounts();
   updateSummary();
   if (app.inboxLive && app.session) {
-    syncTodoTriageAfterInboxLoad().catch((error) => {
-      clientAudit('todo.triage_inbox_path_error', { error: error?.message || 'unknown' });
-    });
+    scheduleTodoTriageAfterInboxLoad();
+  }
+}
+
+async function refreshInboxInBackground({ renderAfter = false } = {}) {
+  try {
+    await loadInbox();
+    if (renderAfter && app.currentTab === 'inbox') renderInbox();
+  } catch (error) {
+    clientAudit('inbox.background_refresh_error', { error: error?.message || 'unknown' });
   }
 }
 
@@ -2459,40 +2512,33 @@ async function hydrate() {
   loadLocalState();
   await loadLeads();
   mergeManualLeadsIntoApp();
-  await loadInbox();
   void probeAiTriage();
   syncHeroFilterFromUrl();
   migrateLegacyState();
   if (app.supabase && app.session) {
     await loadSupabaseState();
-    try {
-      const todoPull = await pullTodoNotesToLeadflow();
-      if (todoPull?.results?.some((item) => item.action === 'comment_appended')) {
-        await loadSupabaseState();
-      }
-    } catch (error) {
-      clientAudit('todo.pull_error', { error: error?.message || 'unknown' });
-    }
-    try {
-      const triagePull = await pullTodoTriageDecisions();
-      if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
-        await loadLeads();
-        mergeManualLeadsIntoApp();
-        await loadSupabaseState();
-        await loadInbox();
-      }
-    } catch (error) {
-      clientAudit('todo.triage_pull_error', { error: error?.message || 'unknown' });
-    }
-    try {
-      await syncInboxTriageToTodo();
-    } catch (error) {
-      clientAudit('todo.triage_sync_error', { error: error?.message || 'unknown' });
-    }
-    await syncAllMeaningfulStateRemote();
   }
   render();
   setDefaultSyncStatus();
+  void refreshInboxInBackground({ renderAfter: true });
+  if (app.supabase && app.session) {
+    void (async () => {
+      try {
+        const todoPull = await pullTodoNotesToLeadflow();
+        if (todoPull?.results?.some((item) => item.action === 'comment_appended')) {
+          await loadSupabaseState();
+          render();
+        }
+      } catch (error) {
+        clientAudit('todo.pull_error', { error: error?.message || 'unknown' });
+      }
+      try {
+        await syncAllMeaningfulStateRemote();
+      } catch (error) {
+        clientAudit('state.background_sync_error', { error: error?.message || 'unknown' });
+      }
+    })();
+  }
   startInboxPolling();
 }
 
