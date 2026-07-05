@@ -5,6 +5,7 @@ const { verifyPinSession } = require('./lib/pin-session');
 
 const GRAPH_URL = 'https://graph.microsoft.com/v1.0';
 const TODO_LIST_NAME = 'Leads & Intake';
+const FOLLOW_UP_LIST_NAME = 'LeadFlow - Follow Ups';
 const TRIAGE_LIST_NAME = 'LeadFlow - Triage Inbox';
 const MARKER_PREFIX = '[leadflow:';
 const IMPORT_MARKER_PREFIX = '[leadflow-todo-sync:';
@@ -633,7 +634,7 @@ async function pullTriageDecisions({ token, userId, triageListId }) {
     await saveTriageState(lead.id, decision, task, states);
     let followUpTask = null;
     if (decisionCreatesFollowUp(decision)) {
-      if (!intakeList) intakeList = await getTodoList(token, userId, TODO_LIST_NAME);
+      if (!intakeList) intakeList = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
       const state = {
         prospectiveStatus: decisionToLeadStatus(decision),
         comment: `Created from To Do triage decision: ${decision}`,
@@ -693,7 +694,7 @@ module.exports = async (req, res) => {
     const action = body.action || 'sync-lead';
 
     if (action === 'pull-task-notes') {
-      const list = await getTodoList(token, userId, TODO_LIST_NAME);
+      const list = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
       const result = await pullTodoUpdates({ token, userId, listId: list.id });
       audit('todo_sync.pull_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
       return res.status(200).json(result);
@@ -714,7 +715,7 @@ module.exports = async (req, res) => {
       return res.status(200).json(result);
     }
 
-    const list = await getTodoList(token, userId, TODO_LIST_NAME);
+    const list = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
     const result = await upsertLeadTask({ token, userId, listId: list.id, lead: body.lead || {}, state: body.state || {} });
     audit('todo_sync.upsert_ok', { ip, user: claims.email || 'pin-session', action: result.action || 'skipped', lead_id: body.lead?.id || null });
     return res.status(200).json(result);
@@ -727,6 +728,7 @@ module.exports = async (req, res) => {
 
 module.exports._test = {
   TODO_LIST_NAME,
+  FOLLOW_UP_LIST_NAME,
   TRIAGE_LIST_NAME,
   TRIAGE_DECISIONS,
   TRACKED_STATUSES,

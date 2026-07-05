@@ -1772,7 +1772,7 @@ async function loadSupabaseState() {
   persistLocalState();
 }
 
-async function saveStateRemote(leadId) {
+async function saveStateRemote(leadId, { syncTodo = true } = {}) {
   if (!(app.supabase && app.session)) return;
   if (!app.remoteLeadIds.has(Number(leadId))) return;
   const state = getDurableStateForHidden(getLeadState(leadId));
@@ -1802,11 +1802,13 @@ async function saveStateRemote(leadId) {
     throw new Error(body.error || `Lead state sync error ${response.status}`);
   }
   setSyncStatus('Synced');
-  try {
-    await syncLeadToTodo(leadId, state);
-  } catch (error) {
-    clientAudit('todo.sync_error', { lead_id: Number(leadId), error: error?.message || 'unknown' });
-    setSyncStatus('Synced; To Do pending');
+  if (syncTodo) {
+    try {
+      await syncLeadToTodo(leadId, state);
+    } catch (error) {
+      clientAudit('todo.sync_error', { lead_id: Number(leadId), error: error?.message || 'unknown' });
+      setSyncStatus('Synced; To Do pending');
+    }
   }
 }
 
@@ -1828,7 +1830,7 @@ async function syncAllMeaningfulStateRemote() {
   }
   setSyncStatus('Syncing…');
   for (const [leadId] of entries) {
-    await saveStateRemote(leadId);
+    await saveStateRemote(leadId, { syncTodo: false });
   }
   setSyncStatus('Synced');
 }
