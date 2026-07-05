@@ -85,12 +85,12 @@ console.log('\nInbox triage task payload and decisions');
     { displayName: 'YES - prospective lead', isChecked: true },
     { displayName: 'NO - not a lead', isChecked: false },
   ]);
-  assert('reads exactly one checked decision', decision === 'YES - prospective lead', JSON.stringify(decision));
+  assert('reads exactly one checked decision', decision?.decision === 'YES - prospective lead' && decision.multiple === false, JSON.stringify(decision));
   const duplicateDecision = todoSync.getCheckedDecision([
     { displayName: 'YES - prospective lead', isChecked: true },
     { displayName: 'NO - not a lead', isChecked: true },
   ]);
-  assert('ignores ambiguous checked decisions', duplicateDecision === null, JSON.stringify(duplicateDecision));
+  assert('ignores ambiguous checked decisions', duplicateDecision?.decision === null && duplicateDecision.multiple === true, JSON.stringify(duplicateDecision));
   const leadRecord = todoSync.leadRecordFromTriage(email, 'CALL FIRST', 456);
   assert('triage lead record stores To Do source', leadRecord.id === 456 && leadRecord.source_platform === 'To Do triage', JSON.stringify(leadRecord));
   assert('triage lead record stores next action', leadRecord.status === 'follow_up' && leadRecord.next_action.includes('Call first'), JSON.stringify(leadRecord));

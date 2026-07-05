@@ -17,6 +17,15 @@ const DEFAULT_CONFIG = {
 };
 const INBOX_POLL_MS = 45_000;
 const INBOX_API_TIMEOUT_MS = 20000;
+// Microsoft To Do sync is slow and best-effort — throttle aggressively and never
+// block hydrate/inbox rendering on it.
+const TODO_TRIAGE_PULL_MIN_INTERVAL_MS = 10 * 60_000;
+const TODO_TRIAGE_SYNC_MIN_INTERVAL_MS = 3 * 60_000;
+const TODO_TRIAGE_UNCHANGED_RECHECK_MS = 15 * 60_000;
+const TODO_TRIAGE_DEBOUNCE_MS = 1_500;
+const TODO_TRIAGE_MAX_BACKOFF_MS = 30 * 60_000;
+const TODO_TRIAGE_TIMEOUT_MS = 6_500;
+const TODO_TRIAGE_REFRESH_TIMEOUT_MS = 8_000;
 
 // ── Prospective client lifecycle ─────────────────────────────────────────────
 const PROSPECT_STATUSES = [
@@ -140,6 +149,14 @@ const app = {
   todoNotesPulled: false,
   todoTriageSyncing: false,
   todoTriageLastSignature: '',
+  todoTriageLastInboxSignature: '',
+  todoTriageLastInboxSignatureAt: 0,
+  todoTriageQueuedSignature: '',
+  todoTriageDebounceTimer: null,
+  todoTriageLastPullAt: 0,
+  todoTriageLastSyncAt: 0,
+  todoTriageBackoffUntil: 0,
+  todoTriageBackoffStep: 0,
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -843,6 +860,7 @@ async function pullTodoNotesToLeadflow() {
 
 async function syncInboxTriageToTodo() {
   if (!(app.session && isSupabaseEnabled()) || !Array.isArray(app.inbox) || app.inbox.length === 0) return null;
+  if (Date.now() < app.todoTriageBackoffUntil) return { skipped: true, reason: 'todo_triage_backoff' };
   const candidates = app.inbox
     .filter((email) => inboxEmailNeedsAction(email) && !app.inboxDismissed.has(String(email.id)))
     .slice(0, 25);
@@ -852,6 +870,9 @@ async function syncInboxTriageToTodo() {
     .sort()
     .join('\n');
   if (signature === app.todoTriageLastSignature) return null;
+  if (Date.now() - app.todoTriageLastSyncAt < TODO_TRIAGE_SYNC_MIN_INTERVAL_MS) {
+    return { skipped: true, reason: 'todo_triage_sync_throttled' };
+  }
   const response = await fetchWithTimeout('/api/todo-sync', {
     method: 'POST',
     headers: {
@@ -859,15 +880,20 @@ async function syncInboxTriageToTodo() {
       Authorization: `Bearer ${app.session.access_token}`,
     },
     body: JSON.stringify({ action: 'sync-inbox-triage', candidates }),
-  }, 20000);
+  }, TODO_TRIAGE_TIMEOUT_MS);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `To Do triage sync error ${response.status}`);
   app.todoTriageLastSignature = signature;
+  app.todoTriageLastSyncAt = Date.now();
   return body;
 }
 
 async function pullTodoTriageDecisions() {
   if (!(app.session && isSupabaseEnabled())) return null;
+  if (Date.now() < app.todoTriageBackoffUntil) return { skipped: true, reason: 'todo_triage_backoff' };
+  if (Date.now() - app.todoTriageLastPullAt < TODO_TRIAGE_PULL_MIN_INTERVAL_MS) {
+    return { skipped: true, reason: 'todo_triage_pull_throttled' };
+  }
   const response = await fetchWithTimeout('/api/todo-sync', {
     method: 'POST',
     headers: {
@@ -875,23 +901,42 @@ async function pullTodoTriageDecisions() {
       Authorization: `Bearer ${app.session.access_token}`,
     },
     body: JSON.stringify({ action: 'pull-triage-decisions' }),
-  }, 25000);
+  }, TODO_TRIAGE_TIMEOUT_MS);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `To Do triage pull error ${response.status}`);
+  app.todoTriageLastPullAt = Date.now();
   return body;
 }
 
 async function syncTodoTriageAfterInboxLoad() {
   if (!(app.session && isSupabaseEnabled()) || app.todoTriageSyncing) return null;
+  if (Date.now() < app.todoTriageBackoffUntil) return { skipped: true, reason: 'todo_triage_backoff' };
   app.todoTriageSyncing = true;
+  let triagePull = null;
   try {
-    const triagePull = await pullTodoTriageDecisions();
+    triagePull = await pullTodoTriageDecisions();
     if (triagePull?.results?.some((item) => item.action === 'decision_imported')) {
-      await loadLeads();
-      mergeManualLeadsIntoApp();
-      await loadSupabaseState();
+      await Promise.race([
+        (async () => {
+          await loadLeads();
+          mergeManualLeadsIntoApp();
+          await loadSupabaseState();
+        })(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('To Do triage refresh timeout')), TODO_TRIAGE_REFRESH_TIMEOUT_MS)),
+      ]);
     }
-    await syncInboxTriageToTodo();
+    const triageSync = await syncInboxTriageToTodo();
+    app.todoTriageBackoffStep = 0;
+    app.todoTriageBackoffUntil = 0;
+    return triageSync || triagePull;
+  } catch (error) {
+    app.todoTriageBackoffStep = Math.min(app.todoTriageBackoffStep + 1, 6);
+    const backoff = Math.min(TODO_TRIAGE_MAX_BACKOFF_MS, TODO_TRIAGE_SYNC_MIN_INTERVAL_MS * app.todoTriageBackoffStep);
+    app.todoTriageBackoffUntil = Date.now() + backoff;
+    clientAudit('todo.triage_background_error', {
+      error: error?.message || 'unknown',
+      backoff_ms: backoff,
+    });
     return triagePull;
   } finally {
     app.todoTriageSyncing = false;
