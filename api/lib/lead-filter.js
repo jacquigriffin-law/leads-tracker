@@ -27,6 +27,7 @@ const DEDICATED_LEAD_DOMAINS = new Set([
 
 const PLATFORM_LEAD_DOMAINS = new Set([
   'lawconnect.com', 'lawconnect.com.au', 'forward-sms.app',
+  'vxt.co.nz', 'vxt.com', 'vxtapp.com',
 ]);
 
 const TRUSTED_REFERRAL_DOMAINS = new Set([
@@ -40,6 +41,8 @@ const TRUSTED_REFERRAL_DOMAINS = new Set([
 const LEAD_SUBJECT_SIGNALS = [
   'legal aid', 'lawconnect', 'finchly', 'grant of aid', 'offer of work',
   'enquiry', 'inquiry', 'referral', 'new client', 'new matter', 'potential client',
+  'new voicemail', 'voicemail from', 'voice mail from', 'missed call',
+  'missed call from', 'new missed call', 'call from',
   'family law', 'family court', 'federal circuit', 'hearing',
   'consent orders', 'property settlement', 'parenting orders', 'divorce',
   'criminal matter', 'bail', 'sentence', 'court date', 'mention',
@@ -58,12 +61,20 @@ const STRONG_NEW_LEAD_SIGNALS = [
   'referral', 'referred', 'potential client', 'need a solicitor', 'need a lawyer',
   'seeking representation', 'looking for a solicitor', 'looking for a lawyer',
   'can you represent', 'i need legal advice', 'i need legal help', 'grant of aid',
+  'new voicemail', 'voicemail from', 'voice mail from', 'left a voicemail',
+  'left a voice mail', 'missed call from', 'new missed call',
 ];
 
 const SMS_LEAD_SIGNALS = [
   'sms from', 'text from', 'forwarded sms',
   'need a solicitor', 'need a lawyer', 'legal advice', 'legal help',
   'family law', 'divorce', 'parenting', 'custody', 'avo', 'dvo',
+];
+
+const PHONE_LEAD_SIGNALS = [
+  'new voicemail', 'voicemail from', 'voice mail from', 'left a voicemail',
+  'left a voice mail', 'missed call', 'missed call from', 'new missed call',
+  'call from',
 ];
 
 const EXISTING_OR_NON_LEAD_SUBJECT_SIGNALS = [
@@ -245,6 +256,8 @@ function scoreEmail(fromEmail, fromName, subject, snippet = '') {
   const isTrustedReferralDomain = domainMatches(TRUSTED_REFERRAL_DOMAINS);
   const hasStrongLeadSignal = STRONG_NEW_LEAD_SIGNALS.some((sig) => text.includes(sig) || name.includes(sig));
   const hasNoiseSignal = NOISE_SUBJECT_SIGNALS.some((sig) => subj.includes(sig) || body.includes(sig));
+  const hasAustralianPhone = /(?:\+61\s*[2378]|0[2378])[\d\s\-]{8,12}|(?:\+61\s*4|04)\d{2}[\s\-]?\d{3}[\s\-]?\d{3}/.test(text);
+  const hasPhoneLeadSignal = PHONE_LEAD_SIGNALS.some((sig) => text.includes(sig));
 
   // 1. Dedicated lead intake domains — always show.
   if (isDedicatedLeadDomain) return 100;
@@ -253,13 +266,20 @@ function scoreEmail(fromEmail, fromName, subject, snippet = '') {
   // should not keep resurfacing in LeadFlow as unsaved work.
   if (isPlatformLeadDomain) {
     if (hasNoiseSignal) return -60;
-    const hasPhone = /(?:\+61\s*4|04)\d{2}[\s\-]?\d{3}[\s\-]?\d{3}/.test(text);
     const hasSmsLeadSignal = SMS_LEAD_SIGNALS.some((sig) => text.includes(sig));
     if (domainMatches(new Set(['forward-sms.app']))) {
-      return (hasPhone || hasSmsLeadSignal || hasStrongLeadSignal) ? 100 : -70;
+      return (hasAustralianPhone || hasSmsLeadSignal || hasStrongLeadSignal) ? 100 : -70;
+    }
+    if (domainMatches(new Set(['vxt.co.nz', 'vxt.com', 'vxtapp.com']))) {
+      return ((hasAustralianPhone && hasPhoneLeadSignal) || hasStrongLeadSignal) ? 100 : -70;
     }
     return hasStrongLeadSignal ? 100 : -30;
   }
+
+  // Voicemail/missed-call notifications can arrive from phone providers or
+  // forwarded mailbox rules. If they carry a caller number, put them in the
+  // New Leads queue for Jacqui to accept/dismiss rather than silently filtering.
+  if (hasAustralianPhone && hasPhoneLeadSignal) return 60;
 
   // 2. Blocked operational domains — always hide (runs before subject checks).
   for (const d of BLOCKED_OPERATIONAL_DOMAINS) {

@@ -130,6 +130,14 @@ assert('Referral shows', show('case@partner.com.au', 'Partner Firm', 'Referral -
 assert('DVO matter shows', show('client@yahoo.com', 'Client', 'DVO application - need help'));
 assert('Consent orders shows', show('user@icloud.com', 'User', 'Consent orders question'));
 assert('SMS from shows', show('forward@forward-sms.app', 'SMS Forwarder', 'SMS from 0400 111 222'));
+assert('Forward SMS with legal-help body is a new lead',
+  lead('forwarder@app.forward-sms.app', 'Forward SMS', 'New message from 0408 961 344', 'Need a solicitor for family law advice.'));
+assert('VXT voicemail notification with caller number is a new lead',
+  lead('notifications@vxt.co.nz', 'VXT', 'New voicemail from 0408 961 344', 'Voicemail from 0408 961 344 asking for legal advice.'));
+assert('Generic missed call with caller number is a new lead candidate',
+  lead('phone@example.com.au', 'Phone System', 'Missed call from 0408 961 344', 'Missed call from 0408 961 344.'));
+assert('VXT generic account notice without caller details is not a lead',
+  notLead('notifications@vxt.co.nz', 'VXT', 'Monthly account update', 'Your VXT account summary is ready.'));
 
 assert('LawAccessNSW offer is a new lead',
   lead('donotreply@legalaid.nsw.gov.au', 'LawAccessNSW', 'Offer of work from Legal Aid NSW - Family Law matter', 'You have received an offer of work from Legal Aid NSW.'));
