@@ -41,7 +41,7 @@ console.log('\nTo Do task payload');
   assert('task title names LeadFlow and client', payload.title.includes('LeadFlow: Jane Example'), payload.title);
   assert('task body includes lead marker', payload.body.content.includes('[leadflow:123]'), payload.body.content);
   assert('task body includes status', payload.body.content.includes('Awaiting Reply'), payload.body.content);
-  assert('urgent lead maps to high importance', payload.importance === 'high', JSON.stringify(payload));
+  assert('urgent lead stays normal importance by default', payload.importance === 'normal', JSON.stringify(payload));
   assert('follow-up date maps to dueDateTime', payload.dueDateTime.dateTime.startsWith('2026-06-30'), JSON.stringify(payload));
 }
 
@@ -71,6 +71,7 @@ console.log('\nInbox triage task payload and decisions');
   };
   const payload = todoSync.buildTriageTaskPayload(email);
   assert('triage task title starts with TRIAGE', payload.title.startsWith('TRIAGE - JGMS'), payload.title);
+  assert('triage task stays normal importance by default', payload.importance === 'normal', JSON.stringify(payload));
   assert('triage body includes marker', payload.body.content.includes('[leadflow-triage:jgms-abc123]'), payload.body.content);
   assert('triage body includes payload marker', payload.body.content.includes('XENA_TRIAGE_PAYLOAD:'), payload.body.content);
   const decoded = todoSync.decodeTriagePayload({ body: payload.body });
@@ -96,5 +97,82 @@ console.log('\nInbox triage task payload and decisions');
   assert('triage lead record stores next action', leadRecord.status === 'follow_up' && leadRecord.next_action.includes('Call first'), JSON.stringify(leadRecord));
 }
 
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
-process.exit(failed > 0 ? 1 : 0);
+async function runAsyncTests() {
+  console.log('\nTriage decision LeadFlow-first guard');
+  const task = { id: 'todo-task-1', title: 'TRIAGE - JGMS - Parenting - Sarah', body: { contentType: 'text', content: '' } };
+  const email = { id: 'email-1', from_name: 'Sarah Sample', subject: 'Parenting matter' };
+
+  const successfulCalls = [];
+  const success = await todoSync.processTriageDecision({
+    task,
+    decision: 'CALL FIRST',
+    email,
+    leads: [],
+    states: [{ user_id: 'pin-user-1' }],
+    sequence: 0,
+  }, {
+    upsertTriageLead: async () => {
+      successfulCalls.push('lead');
+      return { id: 456, sender_name: 'Sarah Sample', status: 'follow_up' };
+    },
+    saveTriageState: async () => {
+      successfulCalls.push('state');
+      return [{ lead_id: 456 }];
+    },
+    getIntakeList: async () => {
+      successfulCalls.push('list');
+      return { id: 'follow-ups' };
+    },
+    upsertLeadTask: async () => {
+      successfulCalls.push('todo');
+      return { task: { id: 'follow-up-task-1' } };
+    },
+    completeTriageTask: async () => {
+      successfulCalls.push('complete');
+    },
+  });
+  assert('successful triage sync creates To Do only after LeadFlow writes', successfulCalls.join('>') === 'lead>state>list>todo>complete', successfulCalls.join('>'));
+  assert('successful triage sync reports follow-up task', success.action === 'synced' && success.follow_up_task_id === 'follow-up-task-1', JSON.stringify(success));
+
+  const failedCalls = [];
+  const failed = await todoSync.processTriageDecision({
+    task,
+    decision: 'CALL FIRST',
+    email,
+    leads: [],
+    states: [{ user_id: 'pin-user-1' }],
+    sequence: 0,
+  }, {
+    upsertTriageLead: async () => {
+      failedCalls.push('lead');
+      return { id: 789, sender_name: 'Sarah Sample', status: 'follow_up' };
+    },
+    saveTriageState: async () => {
+      failedCalls.push('state');
+      throw new Error('state write failed');
+    },
+    getIntakeList: async () => {
+      failedCalls.push('list');
+      return { id: 'follow-ups' };
+    },
+    upsertLeadTask: async () => {
+      failedCalls.push('todo');
+      return { task: { id: 'should-not-exist' } };
+    },
+    completeTriageTask: async () => {
+      failedCalls.push('complete');
+    },
+  });
+  assert('failed LeadFlow state write does not create To Do or complete triage task', failedCalls.join('>') === 'lead>state', failedCalls.join('>'));
+  assert('failed LeadFlow state write reports skipped', failed.action === 'skipped' && failed.reason === 'leadflow_state_write_failed', JSON.stringify(failed));
+}
+
+runAsyncTests()
+  .then(() => {
+    console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
+    process.exit(failed > 0 ? 1 : 0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

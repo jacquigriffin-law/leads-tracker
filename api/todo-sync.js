@@ -289,10 +289,13 @@ function buildTriageTaskBody(email) {
 }
 
 function buildTriageTaskPayload(email) {
+  // Standing rule (Jacqui, 7 Jul 2026): never mark LeadFlow-created tasks as
+  // Important or add to My Day by default. Use normal importance so Jacqui's
+  // starred list stays reserved for genuine human-important work.
   return {
     title: buildTriageTaskTitle(email),
     body: { contentType: 'text', content: buildTriageTaskBody(email) },
-    importance: 'high',
+    importance: 'normal',
   };
 }
 
@@ -402,10 +405,15 @@ function buildTaskBody(lead, state) {
 }
 
 function buildTaskPayload(lead, state) {
+  // Standing rule (Jacqui, 7 Jul 2026): do not set Microsoft To Do
+  // importance=high or add to My Day by default from LeadFlow. Jacqui reserves
+  // the Important flag for genuine human-important work. Priority in LeadFlow
+  // remains the source of truth for prioritisation; the To Do task carries a
+  // real due date only when there is an actual follow-up deadline.
   const payload = {
     title: buildTaskTitle(lead, state),
     body: { contentType: 'text', content: buildTaskBody(lead, state) },
-    importance: String(lead.priority || '').toUpperCase() === 'URGENT' ? 'high' : 'normal',
+    importance: 'normal',
   };
   const due = sanitiseText(state?.follow_up_date || state?.followUpDate, 32);
   if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
@@ -610,11 +618,80 @@ async function pullTodoUpdates({ token, userId, listId }) {
   return { ok: true, configured: true, results };
 }
 
+// Process one triage task with a checked decision. Guarantees that the
+// LeadFlow/Supabase lead row + lead_state row are written and confirmed BEFORE
+// any Microsoft To Do follow-up/action task is created (standing rule from
+// Jacqui, 7 Jul 2026: fail closed if LeadFlow write fails so we never open a
+// To Do action for a lead that did not persist).
+async function processTriageDecision({ task, decision, email, leads, states, sequence }, deps) {
+  const emailId = sanitiseText(email.id, 160);
+  const baseResult = { task_id: task.id, inbox_id: emailId, decision };
+
+  let lead;
+  try {
+    lead = await deps.upsertTriageLead(email, decision, leads, sequence);
+  } catch (error) {
+    return { ...baseResult, action: 'skipped', reason: 'leadflow_lead_write_failed', error: error?.message || 'unknown' };
+  }
+  if (!lead || !lead.id) {
+    return { ...baseResult, action: 'skipped', reason: 'leadflow_lead_write_returned_no_row' };
+  }
+  leads.push(lead);
+
+  try {
+    await deps.saveTriageState(lead.id, decision, task, states);
+  } catch (error) {
+    return {
+      ...baseResult,
+      lead_id: lead.id,
+      action: 'skipped',
+      reason: 'leadflow_state_write_failed',
+      error: error?.message || 'unknown',
+    };
+  }
+
+  // LeadFlow lead + state confirmed. Only now is it safe to create a follow-up
+  // To Do action or mark the triage task complete.
+  let followUpTask = null;
+  if (decisionCreatesFollowUp(decision)) {
+    const intakeList = await deps.getIntakeList();
+    const state = {
+      prospectiveStatus: decisionToLeadStatus(decision),
+      comment: `Created from To Do triage decision: ${decision}`,
+    };
+    const synced = await deps.upsertLeadTask({ lead, state, listId: intakeList.id });
+    followUpTask = synced?.task?.id || null;
+  }
+  await deps.completeTriageTask(task.id);
+
+  return {
+    ...baseResult,
+    lead_id: lead.id,
+    status: decisionToLeadStatus(decision),
+    action: 'synced',
+    follow_up_task_id: followUpTask,
+  };
+}
+
 async function pullTriageDecisions({ token, userId, triageListId }) {
   const [leads, states, tasks] = await Promise.all([loadLeads(), loadStates(), getAllTasks(token, userId, triageListId)]);
   const results = [];
   let sequence = 0;
   let intakeList = null;
+
+  const deps = {
+    upsertTriageLead,
+    saveTriageState,
+    getIntakeList: async () => {
+      if (!intakeList) intakeList = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
+      return intakeList;
+    },
+    upsertLeadTask: ({ lead, state, listId }) => upsertLeadTask({ token, userId, listId, lead, state }),
+    completeTriageTask: (taskId) => graphFetch(token, `/users/${userId}/todo/lists/${triageListId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'completed' }),
+    }),
+  };
 
   for (const task of tasks || []) {
     if (String(task.status || '').toLowerCase() === 'completed') continue;
@@ -629,32 +706,8 @@ async function pullTriageDecisions({ token, userId, triageListId }) {
     const decision = checked.decision;
     const email = decodeTriagePayload(task) || { id: emailId, subject: task.title, snippet: stripHtml(task.body?.content || '').slice(0, 500) };
     email.id = email.id || emailId;
-    const lead = await upsertTriageLead(email, decision, leads, sequence++);
-    leads.push(lead);
-    await saveTriageState(lead.id, decision, task, states);
-    let followUpTask = null;
-    if (decisionCreatesFollowUp(decision)) {
-      if (!intakeList) intakeList = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
-      const state = {
-        prospectiveStatus: decisionToLeadStatus(decision),
-        comment: `Created from To Do triage decision: ${decision}`,
-      };
-      const synced = await upsertLeadTask({ token, userId, listId: intakeList.id, lead, state });
-      followUpTask = synced.task?.id || null;
-    }
-    await graphFetch(token, `/users/${userId}/todo/lists/${triageListId}/tasks/${task.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'completed' }),
-    });
-    results.push({
-      inbox_id: emailId,
-      lead_id: lead.id,
-      task_id: task.id,
-      decision,
-      status: decisionToLeadStatus(decision),
-      action: 'synced',
-      follow_up_task_id: followUpTask,
-    });
+    const result = await processTriageDecision({ task, decision, email, leads, states, sequence: sequence++ }, deps);
+    results.push(result);
   }
 
   return { ok: true, configured: true, results };
@@ -745,6 +798,7 @@ module.exports._test = {
   getCheckedDecision,
   leadMarker,
   leadRecordFromTriage,
+  processTriageDecision,
   shouldSyncLead,
   stripHtml,
   triageMarker,
