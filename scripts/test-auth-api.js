@@ -40,8 +40,9 @@ function makeRes() {
   process.env.LEADFLOW_SESSION_EMAIL = 'jacquigriffin@mobilesolicitor.com.au';
 
   const auth = require(path.join(__dirname, '..', 'api', 'auth'));
-  const { createSessionToken } = require(path.join(__dirname, '..', 'api', 'lib', 'pin-session'));
+  const { createSessionToken, SESSION_TTL_MS } = require(path.join(__dirname, '..', 'api', 'lib', 'pin-session'));
   const token = createSessionToken();
+  const sixMonthsMs = 180 * 24 * 60 * 60 * 1000;
 
   console.log('\nGET /api/auth');
   {
@@ -52,6 +53,7 @@ function makeRes() {
     assert('valid cookie authenticates', res.body.authenticated === true, JSON.stringify(res.body));
     assert('returns existing token for localStorage rebuild', res.body.token === token);
     assert('returns expiry for localStorage rebuild', typeof res.body.expires_at === 'string' && res.body.expires_at.includes('T'), JSON.stringify(res.body));
+    assert('PIN session lasts roughly six months', SESSION_TTL_MS === sixMonthsMs, `ttl=${SESSION_TTL_MS}`);
     assert('does not return PIN', !('pin' in res.body), JSON.stringify(res.body));
   }
 

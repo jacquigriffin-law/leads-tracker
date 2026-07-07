@@ -3,7 +3,9 @@
 const { createHmac, randomBytes, timingSafeEqual } = require('crypto');
 
 const COOKIE_NAME = 'leadflow_session';
-const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+// Keep Jacqui's own device unlocked for roughly six months. The token remains
+// signed server-side and is cleared immediately when she uses Sign out.
+const SESSION_TTL_SECONDS = 180 * 24 * 60 * 60;
 const SESSION_TTL_MS = SESSION_TTL_SECONDS * 1000;
 const DEFAULT_USER_EMAIL = 'jacquigriffin@mobilesolicitor.com.au';
 
