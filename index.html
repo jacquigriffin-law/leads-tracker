@@ -87,6 +87,16 @@ body::after{content:"";position:fixed;inset:auto -10% 8% auto;width:260px;height
 .command-centre-metric-label{display:block;margin-top:5px;font-size:11px;font-weight:800;color:#6d8099;line-height:1.25}
 .command-centre-actions{display:flex;gap:8px;flex-wrap:wrap}
 .command-centre-actions .btn-pipeline{font-size:12px;padding:8px 11px}
+.source-health{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 11px;border-radius:14px;border:1px solid var(--line);background:#f8fafc;color:#475569;font-size:12px;line-height:1.3}
+.source-health-label{font-weight:900;letter-spacing:.02em}
+.source-health-detail{font-weight:650;color:#52657d}
+.source-health-hidden{margin-left:auto;font-weight:850;padding:3px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;white-space:nowrap}
+.source-health-ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+.source-health-ok .source-health-detail{color:#047857}
+.source-health-warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+.source-health-warn .source-health-detail{color:#a16207}
+.source-health-error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.source-health-error .source-health-detail{color:#b42318}
 @media(max-width:640px){.command-centre{margin-top:0}.command-centre-grid{grid-template-columns:repeat(2,1fr)}.command-centre-top{align-items:center}.command-centre-title{font-size:16px}}
 
 /* ── Tabs: rounded segmented control ── */
@@ -381,6 +391,7 @@ button{font:inherit}
 .status-badge-declined{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
 .status-badge-closed-no-response{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
 .stale-indicator{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;margin-left:5px}
+.warm-lead-indicator{background:#fff1f2;color:#be123c;border-color:#fda4af}
 
 /* ── Follow-up view ── */
 .fu-review-notice{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:11px 14px;font-size:13px;font-weight:600;color:#1e40af;margin-bottom:14px;line-height:1.45}

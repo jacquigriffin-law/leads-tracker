@@ -415,6 +415,23 @@ function getFollowUpPriority(lead, state) {
   return null;
 }
 
+function getWarmLeadProtection(lead, state) {
+  if (getPipelineTab(lead, state) !== 'new_leads') return null;
+  const effectiveStatus = getEffectiveProspectiveStatus(lead, state);
+  if (effectiveStatus && effectiveStatus !== 'new_lead') return null;
+  const leadDate = parseLeadDate(lead?.date_received);
+  if (!leadDate) return null;
+  const elapsedMinutes = (Date.now() - leadDate.getTime()) / 60000;
+  const priority = String(lead?.priority || '').toUpperCase();
+  const threshold = priority === 'URGENT' || priority === 'HIGH' ? 30 : 60;
+  if (elapsedMinutes < threshold) return null;
+  const hours = Math.max(1, Math.floor(elapsedMinutes / 60));
+  return {
+    bucket: elapsedMinutes >= 180 ? 'stale' : 'due',
+    label: hours === 1 ? 'Warm lead waiting 1h+' : `Warm lead waiting ${hours}h+`,
+  };
+}
+
 function getEffectiveProspectiveStatus(lead, state) {
   const stateStatus = String(state?.prospectiveStatus || '').trim();
   if (stateStatus) return stateStatus;
@@ -1902,6 +1919,10 @@ function renderLead(lead, index) {
   const staleBadge = prospectPriority?.bucket === 'stale'
     ? `<span class="stale-indicator">${escapeHtml(prospectPriority.label)}</span>`
     : '';
+  const warmProtection = getWarmLeadProtection(lead, state);
+  const warmBadge = warmProtection
+    ? `<span class="stale-indicator warm-lead-indicator">${escapeHtml(warmProtection.label)}</span>`
+    : '';
   const conflictBadgeClass = getConflictBadgeClass(state.conflictStatus);
   const conflictBadge = state.conflictStatus
     ? `<span class="${escapeHtml(conflictBadgeClass)}">&#9998; ${escapeHtml(getConflictStatusLabel(state.conflictStatus))}</span>`
@@ -1969,7 +1990,7 @@ function renderLead(lead, index) {
           </div>
           <div class="pill ${pillClass(lead.priority)} priority-pill">${escapeHtml(priorityLabel)}</div>
         </div>
-        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}${statusBadge}${staleBadge}${conflictBadge}</div>
+        <div class="meta">${agoBadge}<span>${escapeHtml(date)}</span><span class="meta-sep">•</span><span>${escapeHtml(sourceLabel)}</span>${manualBadge}${statusBadge}${staleBadge}${warmBadge}${conflictBadge}</div>
       </div>
       ${sideMarkup}
     </div>
@@ -2040,8 +2061,34 @@ function renderFollowUpInboxCard(email) {
 function isLeadAtRiskForPipeline(lead, state) {
   if (getPipelineTab(lead, state) === 'closed') return false;
   if (isLeadAtSlaRisk(lead)) return true;
+  if (getWarmLeadProtection(lead, state)) return true;
   const priorityBucket = getFollowUpPriority(lead, state)?.bucket || '';
   return ['due', 'stale', 'ready'].includes(priorityBucket);
+}
+
+function formatCommandCentreSourceHealth() {
+  const checked = app.inboxLastChecked
+    ? app.inboxLastChecked.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })
+    : '';
+  const accounts = (app.inboxAccounts || [])
+    .map((account) => getSourceMeta(account).label || account)
+    .filter(Boolean);
+  const uniqueAccounts = Array.from(new Set(accounts));
+  const coverage = uniqueAccounts.length ? uniqueAccounts.join(' + ') : (app.inboxAccount || 'Inbox');
+
+  if (app.inboxAuthRequired) {
+    return { level: 'warn', label: 'Sign-in needed', detail: `${coverage} is waiting for PIN/session access.` };
+  }
+  if (app.inboxTransientError) {
+    return { level: 'error', label: 'Inbox check failed', detail: checked ? `Last attempted ${checked}. Tap Check Inbox to retry.` : 'Tap Check Inbox to retry.' };
+  }
+  if (app.inboxLive) {
+    return { level: 'ok', label: 'Sources live', detail: `${coverage}${checked ? ` checked ${checked}` : ' connected'}.` };
+  }
+  if (app.session) {
+    return { level: 'warn', label: 'Checking sources', detail: `${coverage} has not completed a live check yet.` };
+  }
+  return { level: 'warn', label: 'PIN required', detail: 'Unlock LeadFlow to check live sources.' };
 }
 
 function getCommandCentreStats() {
@@ -2055,7 +2102,8 @@ function getCommandCentreStats() {
   const overdueFollowUps = activeLeads.filter((lead) => {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
     const bucket = getFollowUpPriority(lead, state)?.bucket || '';
-    return bucket === 'due' || bucket === 'stale';
+    const warmBucket = getWarmLeadProtection(lead, state)?.bucket || '';
+    return bucket === 'due' || bucket === 'stale' || warmBucket === 'due' || warmBucket === 'stale';
   });
   const conflictPending = activeLeads.filter((lead) => {
     const state = getLeadState(getLeadId(lead, app.leads.indexOf(lead)));
@@ -2079,8 +2127,9 @@ function getCommandCentreStats() {
     nextAction = 'Review new Inbox items';
     nextDetail = `${inboxUnread} message${inboxUnread === 1 ? '' : 's'} waiting to be imported, dismissed, or marked as existing matter.`;
   }
+  const sourceHealth = formatCommandCentreSourceHealth();
   const riskCount = urgent.length + overdueFollowUps.length + ready.length + conflictPending.length + inboxUnread;
-  return { active: activeLeads.length, inboxUnread, urgent: urgent.length, overdue: overdueFollowUps.length, conflictPending: conflictPending.length, ready: ready.length, riskCount, nextAction, nextDetail };
+  return { active: activeLeads.length, inboxUnread, urgent: urgent.length, overdue: overdueFollowUps.length, conflictPending: conflictPending.length, ready: ready.length, riskCount, nextAction, nextDetail, sourceHealth };
 }
 
 function renderCommandCentre() {
@@ -2103,6 +2152,11 @@ function renderCommandCentre() {
       <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.overdue}</span><span class="command-centre-metric-label">Follow-up due</span></div>
       <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.conflictPending}</span><span class="command-centre-metric-label">Conflict pending</span></div>
       <div class="command-centre-metric"><span class="command-centre-metric-value">${stats.ready}</span><span class="command-centre-metric-label">Ready to open</span></div>
+    </div>
+    <div class="source-health source-health-${escapeHtml(stats.sourceHealth.level)}">
+      <span class="source-health-label">${escapeHtml(stats.sourceHealth.label)}</span>
+      <span class="source-health-detail">${escapeHtml(stats.sourceHealth.detail)}</span>
+      ${app.inboxHiddenCount ? `<span class="source-health-hidden">${app.inboxHiddenCount} filtered</span>` : ''}
     </div>
     <div class="command-centre-actions">
       <button class="btn-pipeline btn-pipeline-primary" type="button" data-command-tab="inbox">Check Inbox</button>
