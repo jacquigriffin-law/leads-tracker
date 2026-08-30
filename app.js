@@ -146,6 +146,7 @@ const app = {
   aiTriageAvailable: false,
   aiTriageDrafts: {},
   aiTriageLoading: new Set(),
+  pinSigningIn: false,
   todoNotesPulled: false,
   todoTriageSyncing: false,
   todoTriageLastSignature: '',
@@ -175,7 +176,7 @@ function setSyncStatus(message) {
 }
 
 function setDefaultSyncStatus() {
-  setSyncStatus(app.session ? 'Syncing across devices' : 'Session unavailable');
+  setSyncStatus(app.session ? 'Syncing across devices' : 'PIN required');
 }
 
 function isHomeScreenApp() {
@@ -1163,14 +1164,16 @@ async function restoreSessionFromCookie() {
   return session;
 }
 
-async function createAppSession() {
+async function signInWithPin(pin) {
   const response = await fetchWithTimeout('/api/auth', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
+    body: JSON.stringify({ pin })
   }, 10000);
   const json = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(json.error || `LeadFlow session failed (${response.status})`);
-  if (!json.token) throw new Error('LeadFlow did not return a session.');
+  if (!response.ok) throw new Error(json.error || `PIN login failed (${response.status})`);
+  if (!json.token) throw new Error('PIN login did not return a session.');
   const session = {
     access_token: json.token,
     expires_at: json.expires_at || '',
@@ -1197,13 +1200,6 @@ async function initSupabase() {
       clientAudit('auth.cookie_restore_failed', { error: error?.message || 'unknown' });
     }
   }
-  if (!app.session) {
-    try {
-      app.session = await createAppSession();
-    } catch (error) {
-      clientAudit('auth.session_create_failed', { error: error?.message || 'unknown' });
-    }
-  }
   refreshAuthUi();
 }
 
@@ -1214,9 +1210,12 @@ function refreshAuthUi() {
     return;
   }
   const email = app.session?.user?.email;
-  els.showAuthBtn.hidden = !email;
-  els.showAuthBtn.textContent = app.authPanelOpen ? 'Hide sync settings' : 'Sync settings';
-  els.authPanel.hidden = !email || !app.authPanelOpen;
+  els.showAuthBtn.hidden = false;
+  if (!email) app.authPanelOpen = true;
+  els.showAuthBtn.textContent = email
+    ? (app.authPanelOpen ? 'Hide sync settings' : 'Sync settings')
+    : (app.authPanelOpen ? 'Hide PIN login' : 'Enter PIN to load LeadFlow');
+  els.authPanel.hidden = !app.authPanelOpen;
 
   if (email) {
     if (els.authEmail) {
@@ -1226,16 +1225,23 @@ function refreshAuthUi() {
     if (els.sendMagicLinkBtn) els.sendMagicLinkBtn.hidden = true;
     if (els.authCodeRow) els.authCodeRow.hidden = true;
     if (els.authOtp) els.authOtp.value = '';
-    els.authStatus.textContent = 'This device is signed in to LeadFlow.';
+    els.authStatus.textContent = 'PIN accepted. This device is signed in.';
   } else {
     if (els.authEmail) {
-      els.authEmail.hidden = true;
-      els.authEmail.value = '';
+      els.authEmail.hidden = false;
+      els.authEmail.type = 'password';
+      els.authEmail.inputMode = 'numeric';
+      els.authEmail.autocomplete = 'current-password';
+      els.authEmail.placeholder = 'Enter PIN';
     }
-    if (els.sendMagicLinkBtn) els.sendMagicLinkBtn.hidden = true;
+    if (els.sendMagicLinkBtn) {
+      els.sendMagicLinkBtn.hidden = false;
+      els.sendMagicLinkBtn.disabled = app.pinSigningIn;
+      els.sendMagicLinkBtn.textContent = app.pinSigningIn ? 'Unlocking...' : 'Unlock LeadFlow';
+    }
     if (els.authCodeRow) els.authCodeRow.hidden = true;
     if (els.authOtp) els.authOtp.value = '';
-    els.authStatus.textContent = 'LeadFlow session unavailable.';
+    els.authStatus.textContent = 'Enter the LeadFlow PIN. This device will stay signed in until you sign out.';
   }
   els.signOutBtn.hidden = !email;
   setDefaultSyncStatus();
@@ -2089,7 +2095,7 @@ function formatCommandCentreSourceHealth() {
   const coverage = uniqueAccounts.length ? uniqueAccounts.join(' + ') : (app.inboxAccount || 'Inbox');
 
   if (app.inboxAuthRequired) {
-    return { level: 'warn', label: 'Sign-in needed', detail: `${coverage} is waiting for session access.` };
+    return { level: 'warn', label: 'Sign-in needed', detail: `${coverage} is waiting for PIN/session access.` };
   }
   if (app.inboxTransientError) {
     return { level: 'error', label: 'Inbox check failed', detail: checked ? `Last attempted ${checked}. Tap Check Inbox to retry.` : 'Tap Check Inbox to retry.' };
@@ -2100,7 +2106,7 @@ function formatCommandCentreSourceHealth() {
   if (app.session) {
     return { level: 'warn', label: 'Checking sources', detail: `${coverage} has not completed a live check yet.` };
   }
-  return { level: 'warn', label: 'Session unavailable', detail: 'LeadFlow needs an active session to check live sources.' };
+  return { level: 'warn', label: 'PIN required', detail: 'Unlock LeadFlow to check live sources.' };
 }
 
 function getCommandCentreStats() {
@@ -2551,8 +2557,9 @@ function render() {
     const visibleLeads = getVisibleLeads();
     if (!visibleLeads.length && !app.inbox.length) {
       const authRequired = isSupabaseEnabled() && !app.session;
+      if (authRequired) app.authPanelOpen = true;
       const emptyMsg = authRequired
-        ? `<div class="signin-empty"><strong>Loading LeadFlow</strong><span>LeadFlow is starting a private app session.</span></div>`
+        ? `<div class="signin-empty"><strong>Enter PIN to load LeadFlow</strong><span>LeadFlow is protected. Enter the PIN once and this device will stay signed in.</span><button class="btn btn-primary signin-cta" type="button" data-open-auth="1">Enter PIN</button></div>`
         : 'No leads available.';
       els.list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
       if (authRequired) refreshAuthUi();
@@ -3453,6 +3460,7 @@ function attachEvents() {
   els.showAuthBtn.addEventListener('click', () => {
     app.authPanelOpen = !app.authPanelOpen;
     refreshAuthUi();
+    if (app.authPanelOpen && !app.session) els.authEmail?.focus();
   });
 
   document.addEventListener('click', (event) => {
@@ -3462,13 +3470,48 @@ function attachEvents() {
     app.authPanelOpen = true;
     refreshAuthUi();
     els.authPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => els.authEmail?.focus(), 250);
+  });
+
+  els.sendMagicLinkBtn?.addEventListener('click', async () => {
+    try {
+      if (!isSupabaseEnabled()) return;
+      if (app.pinSigningIn) return;
+      const pin = els.authEmail?.value || '';
+      if (!pin.trim()) throw new Error('Enter the LeadFlow PIN.');
+      app.pinSigningIn = true;
+      els.sendMagicLinkBtn.disabled = true;
+      els.sendMagicLinkBtn.textContent = 'Unlocking...';
+      const session = await signInWithPin(pin);
+      app.session = session;
+      if (els.authEmail) els.authEmail.value = '';
+      refreshAuthUi();
+      await hydrate();
+      showNotice('PIN accepted. This device will stay signed in.', 'success');
+    } catch (error) {
+      handleError(error);
+    } finally {
+      app.pinSigningIn = false;
+      refreshAuthUi();
+    }
+  });
+
+  els.verifyOtpBtn?.addEventListener('click', async () => {
+    els.sendMagicLinkBtn?.click();
   });
 
   els.installHelpBtn?.addEventListener('click', () => {
     const message = isHomeScreenApp()
-      ? 'You are already using the iPhone Home Screen version.'
-      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon.';
+      ? 'You are already using the iPhone Home Screen version. If it asks again, enter the LeadFlow PIN once.'
+      : 'To make an iPhone icon: open this page in Safari, tap Share, tap Add to Home Screen, then open the new LeadFlow icon and enter the PIN once.';
     showNotice(message, 'info');
+  });
+
+  els.authEmail?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      els.sendMagicLinkBtn?.click();
+    }
   });
 
   els.signOutBtn.addEventListener('click', async () => {
@@ -3493,7 +3536,7 @@ function handleError(error) {
   const message = error?.message || 'Something went wrong.';
   if (/rate limit/i.test(message)) {
     setDefaultSyncStatus();
-    showNotice('Too many requests. Wait about a minute, then try again.', 'info');
+    showNotice('Too many PIN attempts. Wait about a minute, then try again.', 'info');
     return;
   }
   setSyncStatus(app.supabase && app.session ? 'Sync issue' : 'Saved on this phone');

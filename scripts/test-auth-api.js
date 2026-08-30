@@ -32,9 +32,11 @@ function makeRes() {
 (async () => {
   const savedEnv = {
     LEADFLOW_SESSION_SECRET: process.env.LEADFLOW_SESSION_SECRET,
+    LEADFLOW_PIN: process.env.LEADFLOW_PIN,
     LEADFLOW_SESSION_EMAIL: process.env.LEADFLOW_SESSION_EMAIL,
   };
   process.env.LEADFLOW_SESSION_SECRET = 'test-secret-for-cookie-restore';
+  process.env.LEADFLOW_PIN = '123456';
   process.env.LEADFLOW_SESSION_EMAIL = 'jacquigriffin@mobilesolicitor.com.au';
 
   const auth = require(path.join(__dirname, '..', 'api', 'auth'));
@@ -65,12 +67,29 @@ function makeRes() {
 
   console.log('\nPOST /api/auth');
   {
-    const req = { method: 'POST', headers: {} };
+    const req = { method: 'POST', headers: {}, body: '{}' };
     const res = makeRes();
     await auth(req, res);
-    assert('POST creates app session without PIN body', res.statusCode === 200, `status=${res.statusCode} body=${JSON.stringify(res.body)}`);
-    assert('POST returns authenticated session token', res.body.authenticated === true && typeof res.body.token === 'string' && res.body.token.length > 20, JSON.stringify(res.body));
-    assert('POST sets HttpOnly session cookie', String(res.headers['Set-Cookie'] || '').includes('HttpOnly'), String(res.headers['Set-Cookie'] || ''));
+    assert('POST without PIN is rejected', res.statusCode === 401, `status=${res.statusCode} body=${JSON.stringify(res.body)}`);
+    assert('POST without PIN does not set cookie', !res.headers['Set-Cookie'], String(res.headers['Set-Cookie'] || ''));
+  }
+
+  {
+    const req = { method: 'POST', headers: {}, body: JSON.stringify({ pin: '000000' }) };
+    const res = makeRes();
+    await auth(req, res);
+    assert('POST with wrong PIN is rejected', res.statusCode === 401, `status=${res.statusCode} body=${JSON.stringify(res.body)}`);
+    assert('wrong PIN does not set cookie', !res.headers['Set-Cookie'], String(res.headers['Set-Cookie'] || ''));
+  }
+
+  {
+    const req = { method: 'POST', headers: {}, body: JSON.stringify({ pin: ' １２３ ４５６ ' }) };
+    const res = makeRes();
+    await auth(req, res);
+    assert('POST accepts valid PIN with mobile formatting', res.statusCode === 200, `status=${res.statusCode} body=${JSON.stringify(res.body)}`);
+    assert('valid PIN returns authenticated session token', res.body.authenticated === true && typeof res.body.token === 'string' && res.body.token.length > 20, JSON.stringify(res.body));
+    assert('valid PIN sets HttpOnly session cookie', String(res.headers['Set-Cookie'] || '').includes('HttpOnly'), String(res.headers['Set-Cookie'] || ''));
+    assert('valid PIN response does not return PIN', !('pin' in res.body), JSON.stringify(res.body));
   }
 
   for (const [key, value] of Object.entries(savedEnv)) {

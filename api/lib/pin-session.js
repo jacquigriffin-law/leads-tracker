@@ -13,6 +13,10 @@ function getSessionSecret() {
   return process.env.LEADFLOW_SESSION_SECRET || '';
 }
 
+function getConfiguredPin() {
+  return process.env.LEADFLOW_PIN || '';
+}
+
 function getSessionUser() {
   return process.env.LEADFLOW_SESSION_EMAIL || DEFAULT_USER_EMAIL;
 }
@@ -21,6 +25,19 @@ function safeEqual(a, b) {
   const aBuf = Buffer.from(String(a));
   const bBuf = Buffer.from(String(b));
   return aBuf.length === bBuf.length && timingSafeEqual(aBuf, bBuf);
+}
+
+function normalisePin(pin) {
+  return String(pin || '')
+    .normalize('NFKC')
+    .replace(/[\s\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+}
+
+function verifyPin(pin) {
+  const configured = normalisePin(getConfiguredPin());
+  const supplied = normalisePin(pin);
+  return Boolean(configured && supplied && safeEqual(supplied, configured));
 }
 
 function signPayload(payload, secret) {
@@ -111,6 +128,7 @@ function clearSessionCookie() {
 module.exports = {
   SESSION_TTL_MS,
   createSessionToken,
+  verifyPin,
   verifyPinSession,
   verifyLeadflowSession: verifyPinSession,
   getCookieSessionToken,
