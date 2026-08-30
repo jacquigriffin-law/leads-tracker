@@ -5,18 +5,16 @@ const { verifyPinSession } = require('./lib/pin-session');
 
 const GRAPH_URL = 'https://graph.microsoft.com/v1.0';
 const TODO_LIST_NAME = 'Leads & Intake';
-const FOLLOW_UP_LIST_NAME = 'LeadFlow - Follow Ups';
-const TRIAGE_LIST_NAME = 'LeadFlow - Triage Inbox';
 const MARKER_PREFIX = '[leadflow:';
 const IMPORT_MARKER_PREFIX = '[leadflow-todo-sync:';
 const TRIAGE_MARKER_PREFIX = '[leadflow-triage:';
 const TRIAGE_PAYLOAD_PREFIX = 'XENA_TRIAGE_PAYLOAD:';
 const TRIAGE_DECISIONS = [
+  'CALL FIRST',
   'YES - prospective lead',
   'NO - not a lead',
   'EXISTING MATTER',
   'DUPLICATE',
-  'CALL FIRST',
 ];
 const TRIAGE_STATUS_BY_DECISION = {
   'YES - prospective lead': 'new',
@@ -173,16 +171,6 @@ async function getTodoList(token, userId, listName = TODO_LIST_NAME) {
   return list;
 }
 
-async function getOrCreateTodoList(token, userId, listName) {
-  const data = await graphFetch(token, `/users/${userId}/todo/lists?$top=100`);
-  const list = (data.value || []).find((item) => String(item.displayName || '').trim().toLowerCase() === listName.toLowerCase());
-  if (list?.id) return list;
-  return graphFetch(token, `/users/${userId}/todo/lists`, {
-    method: 'POST',
-    body: JSON.stringify({ displayName: listName }),
-  });
-}
-
 async function getAllTasks(token, userId, listId) {
   const tasks = [];
   let endpoint = `/users/${userId}/todo/lists/${listId}/tasks?$top=200`;
@@ -201,9 +189,20 @@ async function getChecklistItems(token, userId, listId, taskId) {
 
 async function ensureDecisionChecklist(token, userId, listId, taskId) {
   const existing = await getChecklistItems(token, userId, listId, taskId);
-  const existingNames = new Set(existing.map((item) => String(item.displayName || '').trim().toLowerCase()));
+  const expectedNames = new Set(TRIAGE_DECISIONS.map((decision) => decision.toLowerCase()));
+  const keptNames = new Set();
+  for (const item of existing) {
+    const name = String(item.displayName || '').trim().toLowerCase();
+    if (!expectedNames.has(name) || keptNames.has(name)) {
+      await graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${taskId}/checklistItems/${item.id}`, {
+        method: 'DELETE',
+      });
+      continue;
+    }
+    keptNames.add(name);
+  }
   for (const decision of TRIAGE_DECISIONS) {
-    if (existingNames.has(decision.toLowerCase())) continue;
+    if (keptNames.has(decision.toLowerCase())) continue;
     await graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${taskId}/checklistItems`, {
       method: 'POST',
       body: JSON.stringify({ displayName: decision }),
@@ -225,6 +224,11 @@ function findTaskForTriage(tasks, emailId) {
     const body = stripHtml(task.body?.content || '');
     return String(task.title || '').includes(marker) || body.includes(marker);
   }) || null;
+}
+
+function findConvertedTriageTask(tasks, emailId) {
+  const sourceLine = `LeadFlow source inbox id: ${sanitiseText(emailId, 160)}`;
+  return tasks.find((task) => stripHtml(task.body?.content || '').includes(sourceLine)) || null;
 }
 
 function encodeTriagePayload(email) {
@@ -256,6 +260,12 @@ function decodeTriagePayload(task) {
 function getTriageIdFromTask(task) {
   const text = `${task.title || ''}\n${stripHtml(task.body?.content || '')}`;
   const match = text.match(/\[leadflow-triage:([^\]]+)\]/);
+  return match ? match[1] : '';
+}
+
+function getLeadIdFromTask(task) {
+  const text = `${task.title || ''}\n${stripHtml(task.body?.content || '')}`;
+  const match = text.match(/\[leadflow:([^\]]+)\]/);
   return match ? match[1] : '';
 }
 
@@ -352,6 +362,11 @@ async function syncInboxTriage({ token, userId, listId, candidates }) {
 
   for (const email of safeCandidates) {
     const existing = findTaskForTriage(tasks, email.id);
+    const converted = findConvertedTriageTask(tasks, email.id);
+    if (!existing && converted?.id) {
+      results.push({ inbox_id: String(email.id), task_id: converted.id, action: 'skipped', reason: 'already_converted_to_follow_up' });
+      continue;
+    }
     const payload = buildTriageTaskPayload(email);
     let task;
     let action;
@@ -373,7 +388,7 @@ async function syncInboxTriage({ token, userId, listId, candidates }) {
     results.push({ inbox_id: String(email.id), task_id: task.id, action });
   }
 
-  return { ok: true, configured: true, list: TRIAGE_LIST_NAME, results };
+  return { ok: true, configured: true, list: TODO_LIST_NAME, results };
 }
 
 function buildTaskTitle(lead, state) {
@@ -446,6 +461,35 @@ async function upsertLeadTask({ token, userId, listId, lead, state }) {
     body: JSON.stringify(payload),
   });
   return { ok: true, configured: true, action: 'created', task };
+}
+
+function buildAcceptedTriageTaskPayload({ lead, state, originalTask }) {
+  const originalBody = stripHtml(originalTask?.body?.content || '');
+  const triageId = getTriageIdFromTask(originalTask);
+  const sourceLines = [];
+  if (triageId) sourceLines.push(`LeadFlow source inbox id: ${sanitiseText(triageId, 160)}`);
+  sourceLines.push(`Converted from To Do decision: ${sanitiseText(state?.decision || 'YES - prospective lead', 80)}`);
+  if (originalTask?.id) sourceLines.push(`Original To Do task: ${sanitiseText(originalTask.id, 120)}`);
+  if (originalBody) {
+    const withoutPayload = originalBody
+      .split(/\r?\n/)
+      .filter((line) => !line.startsWith(TRIAGE_PAYLOAD_PREFIX) && !line.startsWith(TRIAGE_MARKER_PREFIX))
+      .join('\n')
+      .trim();
+    if (withoutPayload) sourceLines.push('', 'Original triage note:', sanitiseText(withoutPayload, 4000));
+  }
+
+  const mergedState = {
+    ...state,
+    comment: [sanitiseText(state?.comment || '', 2000), ...sourceLines]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 6000),
+  };
+  const payload = buildTaskPayload(lead, mergedState);
+  payload.status = 'notStarted';
+  payload.importance = 'normal';
+  return payload;
 }
 
 async function supabaseFetch(path, options = {}) {
@@ -529,7 +573,7 @@ async function saveTriageState(leadId, decision, task, states) {
     marker,
     `Microsoft To Do triage decision: ${decision}`,
     `LeadFlow status stored: ${decisionToLeadStatus(decision)}`,
-    `Triage task completed: ${task.title || task.id}`,
+    `Microsoft To Do task retained as follow-up: ${task.title || task.id}`,
   ].join('\n');
   const flags = triageCoreFlags(decision);
   const payload = {
@@ -618,14 +662,23 @@ async function pullTodoUpdates({ token, userId, listId }) {
   return { ok: true, configured: true, results };
 }
 
-// Process one triage task with a checked decision. Guarantees that the
-// LeadFlow/Supabase lead row + lead_state row are written and confirmed BEFORE
-// any Microsoft To Do follow-up/action task is created (standing rule from
-// Jacqui, 7 Jul 2026: fail closed if LeadFlow write fails so we never open a
-// To Do action for a lead that did not persist).
+// Process one triage task with a checked decision. Positive decisions write
+// LeadFlow/Supabase first, then convert the same Leads & Intake task into the
+// follow-up task. Negative/existing/duplicate decisions never create LeadFlow
+// records and only complete the original task.
 async function processTriageDecision({ task, decision, email, leads, states, sequence }, deps) {
   const emailId = sanitiseText(email.id, 160);
   const baseResult = { task_id: task.id, inbox_id: emailId, decision };
+
+  if (!decisionCreatesFollowUp(decision)) {
+    await deps.completeTriageTask(task.id);
+    return {
+      ...baseResult,
+      status: decisionToLeadStatus(decision),
+      action: 'completed_without_leadflow',
+      completed_triage_task: true,
+    };
+  }
 
   let lead;
   try {
@@ -650,44 +703,37 @@ async function processTriageDecision({ task, decision, email, leads, states, seq
     };
   }
 
-  // LeadFlow lead + state confirmed. Only now is it safe to create a follow-up
-  // To Do action or mark the triage task complete.
-  let followUpTask = null;
-  if (decisionCreatesFollowUp(decision)) {
-    const intakeList = await deps.getIntakeList();
-    const state = {
-      prospectiveStatus: decisionToLeadStatus(decision),
-      comment: `Created from To Do triage decision: ${decision}`,
-    };
-    const synced = await deps.upsertLeadTask({ lead, state, listId: intakeList.id });
-    followUpTask = synced?.task?.id || null;
-  }
-  await deps.completeTriageTask(task.id);
+  // LeadFlow lead + state confirmed. Only now is it safe to change the To Do
+  // task away from triage; keep this original task open as the working item.
+  const taskUpdate = await deps.updateTriageTaskToFollowUp(task.id, lead, {
+    prospectiveStatus: decisionToLeadStatus(decision),
+    decision,
+    comment: `Created from To Do triage decision: ${decision}`,
+  }, task);
 
   return {
     ...baseResult,
     lead_id: lead.id,
     status: decisionToLeadStatus(decision),
     action: 'synced',
-    follow_up_task_id: followUpTask,
+    follow_up_task_id: taskUpdate?.id || task.id,
+    kept_original_task: true,
   };
 }
 
-async function pullTriageDecisions({ token, userId, triageListId }) {
-  const [leads, states, tasks] = await Promise.all([loadLeads(), loadStates(), getAllTasks(token, userId, triageListId)]);
+async function pullTriageDecisions({ token, userId, listId }) {
+  const [leads, states, tasks] = await Promise.all([loadLeads(), loadStates(), getAllTasks(token, userId, listId)]);
   const results = [];
   let sequence = 0;
-  let intakeList = null;
 
   const deps = {
     upsertTriageLead,
     saveTriageState,
-    getIntakeList: async () => {
-      if (!intakeList) intakeList = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
-      return intakeList;
-    },
-    upsertLeadTask: ({ lead, state, listId }) => upsertLeadTask({ token, userId, listId, lead, state }),
-    completeTriageTask: (taskId) => graphFetch(token, `/users/${userId}/todo/lists/${triageListId}/tasks/${taskId}`, {
+    updateTriageTaskToFollowUp: (taskId, lead, state, originalTask) => graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(buildAcceptedTriageTaskPayload({ lead, state, originalTask })),
+    }),
+    completeTriageTask: (taskId) => graphFetch(token, `/users/${userId}/todo/lists/${listId}/tasks/${taskId}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'completed' }),
     }),
@@ -695,9 +741,10 @@ async function pullTriageDecisions({ token, userId, triageListId }) {
 
   for (const task of tasks || []) {
     if (String(task.status || '').toLowerCase() === 'completed') continue;
+    if (getLeadIdFromTask(task)) continue;
     const emailId = getTriageIdFromTask(task);
     if (!emailId) continue;
-    const checklist = await getChecklistItems(token, userId, triageListId, task.id);
+    const checklist = await getChecklistItems(token, userId, listId, task.id);
     const checked = getCheckedDecision(checklist);
     if (!checked?.decision) {
       if (checked?.multiple) results.push({ task_id: task.id, inbox_id: emailId, action: 'skipped', reason: 'multiple decisions checked' });
@@ -747,7 +794,7 @@ module.exports = async (req, res) => {
     const action = body.action || 'sync-lead';
 
     if (action === 'pull-task-notes') {
-      const list = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
+      const list = await getTodoList(token, userId, TODO_LIST_NAME);
       const result = await pullTodoUpdates({ token, userId, listId: list.id });
       audit('todo_sync.pull_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
       return res.status(200).json(result);
@@ -755,20 +802,20 @@ module.exports = async (req, res) => {
 
     if (action === 'sync-inbox-triage') {
       const emails = Array.isArray(body.candidates) ? body.candidates : (Array.isArray(body.emails) ? body.emails : []);
-      const triageList = await getOrCreateTodoList(token, userId, TRIAGE_LIST_NAME);
-      const result = await syncInboxTriage({ token, userId, listId: triageList.id, candidates: emails });
+      const list = await getTodoList(token, userId, TODO_LIST_NAME);
+      const result = await syncInboxTriage({ token, userId, listId: list.id, candidates: emails });
       audit('todo_sync.triage_upsert_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
       return res.status(200).json(result);
     }
 
     if (action === 'pull-triage-decisions') {
-      const triageList = await getOrCreateTodoList(token, userId, TRIAGE_LIST_NAME);
-      const result = await pullTriageDecisions({ token, userId, triageListId: triageList.id });
+      const list = await getTodoList(token, userId, TODO_LIST_NAME);
+      const result = await pullTriageDecisions({ token, userId, listId: list.id });
       audit('todo_sync.triage_pull_ok', { ip, user: claims.email || 'pin-session', count: result.results.length });
       return res.status(200).json(result);
     }
 
-    const list = await getOrCreateTodoList(token, userId, FOLLOW_UP_LIST_NAME);
+    const list = await getTodoList(token, userId, TODO_LIST_NAME);
     const result = await upsertLeadTask({ token, userId, listId: list.id, lead: body.lead || {}, state: body.state || {} });
     audit('todo_sync.upsert_ok', { ip, user: claims.email || 'pin-session', action: result.action || 'skipped', lead_id: body.lead?.id || null });
     return res.status(200).json(result);
@@ -781,10 +828,9 @@ module.exports = async (req, res) => {
 
 module.exports._test = {
   TODO_LIST_NAME,
-  FOLLOW_UP_LIST_NAME,
-  TRIAGE_LIST_NAME,
   TRIAGE_DECISIONS,
   TRACKED_STATUSES,
+  buildAcceptedTriageTaskPayload,
   buildTaskBody,
   buildTaskPayload,
   buildTriageTaskBody,
@@ -794,6 +840,7 @@ module.exports._test = {
   decisionToLeadStatus,
   findTaskForLead,
   findTaskForTriage,
+  findConvertedTriageTask,
   getEffectiveStatus,
   getCheckedDecision,
   leadMarker,

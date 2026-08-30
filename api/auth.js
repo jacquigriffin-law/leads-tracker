@@ -4,7 +4,6 @@ const {
   createSessionToken,
   sessionCookie,
   clearSessionCookie,
-  verifyPin,
   verifyPinSession,
   getCookieSessionToken,
   getSessionUser,
@@ -55,18 +54,7 @@ module.exports = async (req, res) => {
   if (req.method === 'POST') {
     const clientIp = getClientIp(req);
     if (isRateLimited(clientIp)) {
-      return res.status(429).json({ error: 'Too many PIN attempts. Try again in a minute.' });
-    }
-
-    let body = {};
-    try {
-      body = typeof req.body === 'object' && req.body !== null ? req.body : JSON.parse(req.body || '{}');
-    } catch {
-      return res.status(400).json({ error: 'Invalid request.' });
-    }
-
-    if (!verifyPin(body.pin)) {
-      return res.status(401).json({ error: 'Incorrect PIN.' });
+      return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
     }
 
     try {
@@ -76,10 +64,10 @@ module.exports = async (req, res) => {
         authenticated: true,
         token,
         expires_at: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-        user: { id: 'leadflow-pin', email: getSessionUser() },
+        user: { id: 'leadflow-session', email: getSessionUser() },
       });
     } catch {
-      return res.status(503).json({ error: 'PIN login is not configured.' });
+      return res.status(503).json({ error: 'LeadFlow session is not configured.' });
     }
   }
 

@@ -58,6 +58,10 @@ console.log('\nTask matching and status filter');
 
 console.log('\nInbox triage task payload and decisions');
 {
+  assert('Leads & Intake is the single To Do queue', todoSync.TODO_LIST_NAME === 'Leads & Intake', todoSync.TODO_LIST_NAME);
+  assert('old triage list constant is not exported', !('TRIAGE_LIST_NAME' in todoSync), Object.keys(todoSync).join(','));
+  assert('old follow-up list constant is not exported', !('FOLLOW_UP_LIST_NAME' in todoSync), Object.keys(todoSync).join(','));
+  assert('decision checklist order matches single-queue workflow', todoSync.TRIAGE_DECISIONS.join('|') === 'CALL FIRST|YES - prospective lead|NO - not a lead|EXISTING MATTER|DUPLICATE', todoSync.TRIAGE_DECISIONS.join('|'));
   const email = {
     id: 'jgms-abc123',
     from_name: 'Sarah Sample',
@@ -95,6 +99,18 @@ console.log('\nInbox triage task payload and decisions');
   const leadRecord = todoSync.leadRecordFromTriage(email, 'CALL FIRST', 456);
   assert('triage lead record stores To Do source', leadRecord.id === 456 && leadRecord.source_platform === 'To Do triage', JSON.stringify(leadRecord));
   assert('triage lead record stores next action', leadRecord.status === 'follow_up' && leadRecord.next_action.includes('Call first'), JSON.stringify(leadRecord));
+  const acceptedPayload = todoSync.buildAcceptedTriageTaskPayload({
+    lead: leadRecord,
+    state: { prospectiveStatus: 'follow_up', decision: 'CALL FIRST', comment: 'Created from decision.' },
+    originalTask: { id: 'triage-task-1', title: payload.title, body: payload.body },
+  });
+  assert('accepted triage task is renamed as LeadFlow follow-up', acceptedPayload.title.startsWith('LeadFlow: Sarah Sample'), acceptedPayload.title);
+  assert('accepted triage task keeps original To Do item open', acceptedPayload.status === 'notStarted', JSON.stringify(acceptedPayload));
+  assert('accepted triage task carries LeadFlow marker', acceptedPayload.body.content.includes('[leadflow:456]'), acceptedPayload.body.content);
+  assert('accepted triage task records source without triage marker reprocessing', acceptedPayload.body.content.includes('LeadFlow source inbox id: jgms-abc123') && !acceptedPayload.body.content.includes('[leadflow-triage:'), acceptedPayload.body.content);
+  assert('accepted triage task remains normal importance', acceptedPayload.importance === 'normal', JSON.stringify(acceptedPayload));
+  assert('converted task is found for duplicate prevention', todoSync.findConvertedTriageTask([{ id: 'converted', body: acceptedPayload.body }], 'jgms-abc123').id === 'converted');
+  assert('converted task is not treated as active triage', todoSync.findTaskForTriage([{ id: 'converted', title: acceptedPayload.title, body: acceptedPayload.body }], 'jgms-abc123') === null);
 }
 
 async function runAsyncTests() {
@@ -121,18 +137,21 @@ async function runAsyncTests() {
     },
     getIntakeList: async () => {
       successfulCalls.push('list');
-      return { id: 'follow-ups' };
+      throw new Error('old duplicate list path should not be used');
     },
     upsertLeadTask: async () => {
-      successfulCalls.push('todo');
-      return { task: { id: 'follow-up-task-1' } };
+      throw new Error('old duplicate task path should not be used');
+    },
+    updateTriageTaskToFollowUp: async (taskId) => {
+      successfulCalls.push(`update:${taskId}`);
+      return { id: taskId };
     },
     completeTriageTask: async () => {
       successfulCalls.push('complete');
     },
   });
-  assert('successful triage sync creates To Do only after LeadFlow writes', successfulCalls.join('>') === 'lead>state>list>todo>complete', successfulCalls.join('>'));
-  assert('successful triage sync reports follow-up task', success.action === 'synced' && success.follow_up_task_id === 'follow-up-task-1', JSON.stringify(success));
+  assert('successful triage sync updates same task only after LeadFlow writes', successfulCalls.join('>') === 'lead>state>update:todo-task-1', successfulCalls.join('>'));
+  assert('successful triage sync reports same task as follow-up', success.action === 'synced' && success.follow_up_task_id === 'todo-task-1' && success.kept_original_task === true, JSON.stringify(success));
 
   const failedCalls = [];
   const failed = await todoSync.processTriageDecision({
@@ -159,12 +178,44 @@ async function runAsyncTests() {
       failedCalls.push('todo');
       return { task: { id: 'should-not-exist' } };
     },
+    updateTriageTaskToFollowUp: async () => {
+      failedCalls.push('update');
+      return { id: 'should-not-update' };
+    },
     completeTriageTask: async () => {
       failedCalls.push('complete');
     },
   });
-  assert('failed LeadFlow state write does not create To Do or complete triage task', failedCalls.join('>') === 'lead>state', failedCalls.join('>'));
+  assert('failed LeadFlow state write does not change or complete To Do triage task', failedCalls.join('>') === 'lead>state', failedCalls.join('>'));
   assert('failed LeadFlow state write reports skipped', failed.action === 'skipped' && failed.reason === 'leadflow_state_write_failed', JSON.stringify(failed));
+
+  const negativeCalls = [];
+  const negative = await todoSync.processTriageDecision({
+    task,
+    decision: 'NO - not a lead',
+    email,
+    leads: [],
+    states: [{ user_id: 'pin-user-1' }],
+    sequence: 0,
+  }, {
+    upsertTriageLead: async () => {
+      negativeCalls.push('lead');
+      return { id: 999 };
+    },
+    saveTriageState: async () => {
+      negativeCalls.push('state');
+      return [{ lead_id: 999 }];
+    },
+    updateTriageTaskToFollowUp: async () => {
+      negativeCalls.push('update');
+      return { id: 'should-not-update' };
+    },
+    completeTriageTask: async () => {
+      negativeCalls.push('complete');
+    },
+  });
+  assert('negative triage decision does not write LeadFlow', negativeCalls.join('>') === 'complete', negativeCalls.join('>'));
+  assert('negative triage decision completes without lead id', negative.action === 'completed_without_leadflow' && negative.completed_triage_task === true && !negative.lead_id, JSON.stringify(negative));
 }
 
 runAsyncTests()

@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<!-- LeadFlow can run as an iPhone Home Screen app. Unlock with a PIN
-     and keep the resulting session saved on this device. -->
+<!-- LeadFlow can run as an iPhone Home Screen app and keep its session saved on this device. -->
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="LeadFlow"/>
@@ -524,12 +523,10 @@ button{font:inherit}
 <div class="wrap">
   <div class="auth-panel" id="authPanel" hidden>
     <div class="auth-row">
-      <input id="authEmail" type="password" inputmode="numeric" placeholder="Enter PIN" autocomplete="current-password"/>
-      <button class="btn btn-primary" id="sendMagicLinkBtn">Unlock</button>
       <button class="btn btn-secondary" id="signOutBtn" hidden>Sign out</button>
     </div>
     <div class="auth-code-row" id="authCodeRow" hidden></div>
-    <div class="muted" id="authStatus">Enter the LeadFlow PIN once. LeadFlow will stay unlocked on this device.</div>
+    <div class="muted" id="authStatus">This device is signed in to LeadFlow.</div>
   </div>
 
   <div class="notice" id="notice" hidden></div>

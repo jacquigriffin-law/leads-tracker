@@ -100,7 +100,7 @@ globalThis.__leadflowAppTest = {
   importInboxEmailWithStage,
   loadSupabaseState,
   saveStateRemote,
-  restorePinSessionFromCookie,
+  restoreSessionFromCookie,
   syncLeadToTodo,
   syncInboxTriageToTodo,
   pullTodoTriageDecisions,
@@ -118,10 +118,10 @@ globalThis.__leadflowAppTest = {
   const { sandbox, api, storage } = loadAppSandbox();
   const { app } = api;
 
-  console.log('\nPIN session restored from HttpOnly cookie');
+  console.log('\nLeadFlow session restored from HttpOnly cookie');
   {
     sandbox.fetch = async (url, options = {}) => {
-      assert('checks /api/auth when local PIN session is missing', String(url) === '/api/auth', String(url));
+      assert('checks /api/auth when local session is missing', String(url) === '/api/auth', String(url));
       assert('cookie restore uses no-store', options.cache === 'no-store', JSON.stringify(options));
       assert('cookie restore keeps same-origin credentials', options.credentials === 'same-origin', JSON.stringify(options));
       return {
@@ -134,9 +134,9 @@ globalThis.__leadflowAppTest = {
         }),
       };
     };
-    const restored = await api.restorePinSessionFromCookie();
-    assert('cookie token becomes app session shape', restored.access_token === 'cookie-token' && restored.provider === 'pin', JSON.stringify(restored));
-    assert('restored cookie token is written to localStorage', JSON.parse(storage.get('leadflow-pin-session-v1') || '{}').access_token === 'cookie-token');
+    const restored = await api.restoreSessionFromCookie();
+    assert('cookie token becomes app session shape', restored.access_token === 'cookie-token' && restored.provider === 'leadflow', JSON.stringify(restored));
+    assert('restored cookie token is written to localStorage', JSON.parse(storage.get('leadflow-session-v1') || '{}').access_token === 'cookie-token');
   }
 
   console.log('\npipeline status from production base schema');
@@ -419,10 +419,10 @@ globalThis.__leadflowAppTest = {
       assert('calls todo sync endpoint for decision pull', String(url) === '/api/todo-sync', String(url));
       const body = JSON.parse(options.body);
       assert('todo triage pull sends action', body.action === 'pull-triage-decisions', JSON.stringify(body));
-      return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'decision_imported', lead_id: 303 }] }) };
+      return { ok: true, json: async () => ({ ok: true, configured: true, results: [{ action: 'synced', lead_id: 303, follow_up_task_id: 'todo-task-303' }] }) };
     };
     const result = await api.pullTodoTriageDecisions();
-    assert('triage pull returns result', result.results[0].action === 'decision_imported', JSON.stringify(result));
+    assert('triage pull returns result', result.results[0].action === 'synced', JSON.stringify(result));
     assert('triage pull was called once', calls.length === 1, JSON.stringify(calls));
     const throttled = await api.pullTodoTriageDecisions();
     assert('triage decision pull is throttled after success', throttled?.reason === 'todo_triage_pull_throttled' && calls.length === 1, JSON.stringify(throttled));

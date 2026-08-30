@@ -3,7 +3,7 @@
 const { createHmac, randomBytes, timingSafeEqual } = require('crypto');
 
 const COOKIE_NAME = 'leadflow_session';
-// Keep Jacqui's own device unlocked for roughly six months. The token remains
+// Keep Jacqui's own device signed in for roughly six months. The token remains
 // signed server-side and is cleared immediately when she uses Sign out.
 const SESSION_TTL_SECONDS = 180 * 24 * 60 * 60;
 const SESSION_TTL_MS = SESSION_TTL_SECONDS * 1000;
@@ -11,10 +11,6 @@ const DEFAULT_USER_EMAIL = 'jacquigriffin@mobilesolicitor.com.au';
 
 function getSessionSecret() {
   return process.env.LEADFLOW_SESSION_SECRET || '';
-}
-
-function getConfiguredPin() {
-  return process.env.LEADFLOW_PIN || '';
 }
 
 function getSessionUser() {
@@ -27,11 +23,6 @@ function safeEqual(a, b) {
   return aBuf.length === bBuf.length && timingSafeEqual(aBuf, bBuf);
 }
 
-function verifyPin(pin) {
-  const configured = getConfiguredPin();
-  return Boolean(configured && safeEqual(String(pin || '').trim(), configured));
-}
-
 function signPayload(payload, secret) {
   return createHmac('sha256', secret).update(payload).digest('base64url');
 }
@@ -41,7 +32,7 @@ function createSessionToken() {
   if (!secret) throw new Error('LEADFLOW_SESSION_SECRET not configured');
   const now = Date.now();
   const claims = {
-    sub: 'leadflow-pin',
+    sub: 'leadflow-session',
     email: getSessionUser(),
     scope: 'leadflow',
     iat: Math.floor(now / 1000),
@@ -119,9 +110,7 @@ function clearSessionCookie() {
 
 module.exports = {
   SESSION_TTL_MS,
-  createPinSession: createSessionToken,
   createSessionToken,
-  verifyPin,
   verifyPinSession,
   verifyLeadflowSession: verifyPinSession,
   getCookieSessionToken,

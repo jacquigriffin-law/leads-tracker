@@ -6,7 +6,7 @@
 // Returns { configured, inbox_accounts, emails } — each email is reduced to the
 // minimum triage/import fields needed by the UI, not full message content.
 //
-// AUTH: Requires either the LeadFlow PIN session cookie or a valid Supabase
+// AUTH: Requires either the LeadFlow app session cookie or a valid Supabase
 // session access token in the Authorization header.
 // INBOX_ALLOWED_EMAILS must be set to a comma-separated list of permitted addresses.
 // Missing authorisation config fails closed.

@@ -7,7 +7,7 @@
 //   OPENAI_API_KEY=<key>
 //   OPENAI_MODEL (optional — default: gpt-4o-mini, a current low-cost OpenAI model)
 //
-// AUTH (POST only): Requires the LeadFlow PIN session cookie or a valid
+// AUTH (POST only): Requires the LeadFlow app session cookie or a valid
 // Supabase JWT + INBOX_ALLOWED_EMAILS membership.
 //
 // POST REQUEST BODY:

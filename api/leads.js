@@ -1,4 +1,4 @@
-// GET/POST /api/leads — PIN-session protected server-side path for public.leads
+// GET/POST /api/leads — LeadFlow-session protected server-side path for public.leads
 //
 // AUTH: Requires valid Supabase JWT in Authorization: Bearer <token>.
 //   Verification prefers SUPABASE_JWT_SECRET (local HS256); falls back to
