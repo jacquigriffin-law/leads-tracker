@@ -59,7 +59,7 @@
       ]
     },
     {
-      "source": "/(app\\.js|config\\.js|index\\.html)",
+      "source": "/(app\\.js|config\\.js|index\\.html|sw\\.js)",
       "headers": [
         {
           "key": "Cache-Control",

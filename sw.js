@@ -1,8 +1,9 @@
-const LEADFLOW_CACHE = 'leadflow-app-shell-v11';
+const LEADFLOW_CACHE = 'leadflow-app-shell-v12';
+const APP_BUNDLE = '/app.js?v=20260908-pin-gate';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/app.js',
+  APP_BUNDLE,
   '/hero-fallback.js',
   '/manifest.webmanifest',
   '/favicon.ico',
